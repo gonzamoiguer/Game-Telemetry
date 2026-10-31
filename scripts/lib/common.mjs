@@ -1,7 +1,6 @@
 // Shared helpers for the npm scripts. Plain Node, so they work on Windows too.
 import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { createRequire } from "node:module";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -12,21 +11,17 @@ export const DB_NAME = "urbes-telemetry";
 export const BUCKET = "urbes-telemetry-shots";
 export const LOCAL_URL = "http://localhost:8787";
 
-const WRANGLER = (() => {
-  try {
-    return createRequire(path.join(ROOT, "package.json")).resolve("wrangler/bin/wrangler.js");
-  } catch {
-    return null;
-  }
-})();
+// Called directly with node (no shell, so it behaves the same on Windows). The path is
+// built by hand because wrangler's package "exports" does not expose bin/wrangler.js.
+const WRANGLER_BIN = path.join(ROOT, "node_modules", "wrangler", "bin", "wrangler.js");
 
 /**
  * Runs wrangler with node directly (no shell, so it behaves the same on Windows).
  * `capture: true` returns stdout+stderr instead of streaming them.
  */
 export function wrangler(args, { capture = false, input, env } = {}) {
-  if (!WRANGLER) fatal("wrangler is not installed. Run `npm install` first.");
-  const result = spawnSync(process.execPath, [WRANGLER, ...args], {
+  if (!existsSync(WRANGLER_BIN)) fatal(`wrangler is not installed (looked for ${WRANGLER_BIN}). Run \`npm install\` first.`);
+  const result = spawnSync(process.execPath, [WRANGLER_BIN, ...args], {
     cwd: ROOT,
     input,
     encoding: "utf8",
