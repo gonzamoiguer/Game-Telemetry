@@ -21,6 +21,11 @@ function append(el, children) {
   }
 }
 
+/** A labelled readout: small uppercase label over a value. */
+export function cell(label, value, cls = "") {
+  return h("div", { class: `cell ${cls}` }, h("span", { class: "cell-label" }, label), h("span", { class: "cell-value" }, value));
+}
+
 export class AuthError extends Error {}
 
 /** Calls the viewer API. Throws AuthError on 401 so the app can show the login form. */

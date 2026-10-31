@@ -4,6 +4,12 @@
 // that were later rewound over are drawn dashed and dim.
 import { hm } from "./dom.js";
 
+// Categorical series colours, fixed order, validated for CVD separation and
+// contrast on the dark surface. Every series also has its own labelled row,
+// so colour is never the only cue. Series past the sixth are drawn in grey.
+const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
+const EXTRA = "#9a9a9a";
+
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
 const LANE_H = 16;
@@ -45,6 +51,7 @@ function niceStep(maxT, width) {
  */
 export function createGraph(container, model, onSeek) {
   let width = 0;
+  let valueX = 0;
   let x = () => 0;
   let cursor = null;
   let readouts = [];
@@ -78,18 +85,20 @@ export function createGraph(container, model, onSeek) {
     return [solid, dashed];
   }
 
-  function band(g, top, height, points, label, format, minZero) {
+  function band(g, top, height, points, label, format, color) {
     const values = points.map((p) => p.v);
     let lo = Math.min(...values);
     let hi = Math.max(...values);
-    if (minZero) lo = Math.min(0, lo);
+    lo = Math.min(0, lo);
     if (hi === lo) hi = lo + 1;
     const y = (v) => top + height - 2 - ((v - lo) / (hi - lo)) * (height - 4);
     const [solid, dashed] = stepPaths(points, y);
-    g.append(s("text", { x: 0, y: top + height / 2 + 4, class: "g-label" }, label));
-    if (dashed) g.append(s("path", { d: dashed, class: "g-line abandoned" }));
-    if (solid) g.append(s("path", { d: solid, class: "g-line" }));
-    const readout = s("text", { x: width, y: top + height / 2 + 4, class: "g-value", "text-anchor": "end" });
+    const mid = top + height / 2;
+    g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
+    g.append(s("text", { x: 14, y: mid + 4, class: "g-label" }, label));
+    if (dashed) g.append(s("path", { d: dashed, stroke: color, class: "g-line abandoned" }));
+    if (solid) g.append(s("path", { d: solid, stroke: color, class: "g-line" }));
+    const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
     readouts.push({ el: readout, points, format });
   }
@@ -97,29 +106,32 @@ export function createGraph(container, model, onSeek) {
   function render() {
     width = container.clientWidth;
     if (width === 0) return;
-    const labelW = width < 520 ? 72 : 100;
-    const valueW = 50;
+    const labelW = width < 520 ? 116 : 156;
+    valueX = labelW - 12;
     const x0 = labelW;
-    const x1 = width - valueW;
+    const x1 = width - 6;
     x = (t) => x0 + (model.maxT > 0 ? (t / model.maxT) * (x1 - x0) : 0);
     readouts = [];
 
     const g = s("g");
     let top = 2;
+    let slot = 0;
+    const nextColor = () => SERIES[slot++] ?? EXTRA;
     for (const [name, points] of model.resources) {
-      band(g, top, RES_H, points, name, (v) => String(v), true);
+      band(g, top, RES_H, points, name, (v) => String(v), nextColor());
       top += RES_H;
     }
     if (model.resources.size && model.lanes.size) top += GAP;
     for (const [name, lane] of model.lanes) {
       g.append(s("line", { x1: x0, x2: x1, y1: top + LANE_H - 1.5, y2: top + LANE_H - 1.5, class: "g-lane-base" }));
-      if (lane.points.length) band(g, top, LANE_H, lane.points, name, (v) => `inf ${v}`, true);
-      else g.append(s("text", { x: 0, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      const color = nextColor();
+      if (lane.points.length) band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color);
+      else g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
       for (const mark of lane.marks) {
         const mx = x(mark.t);
         const mid = top + LANE_H / 2;
         const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
-        g.append(s("polygon", { points: shape, class: mark.kind === "in" ? "g-in" : "g-out" }));
+        g.append(s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" }));
       }
       top += LANE_H;
     }

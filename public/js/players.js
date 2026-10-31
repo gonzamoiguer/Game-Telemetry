@@ -23,11 +23,14 @@ export async function playersView(main) {
 
   async function load() {
     const { players } = await api(`players?env=${[...selected].join(",")}`);
-    table.replaceChildren(players.length ? renderTable(players) : h("p", { class: "muted" }, "No players yet."));
+    table.replaceChildren(
+      h("p", { class: "label count" }, `${players.length} player${players.length === 1 ? "" : "s"}`),
+      players.length ? renderTable(players) : h("p", { class: "muted" }, "No players yet."),
+    );
   }
 
   await load();
-  main.replaceChildren(h("header", { class: "page-head" }, h("h1", null, "Players"), chips), table);
+  main.replaceChildren(h("header", { class: "page-head" }, h("h1", null, "Players"), h("span", { class: "label" }, "env"), chips), table);
 }
 
 function renderTable(players) {
@@ -44,7 +47,7 @@ function renderTable(players) {
         h(
           "tr",
           { class: "link-row", onclick: go(p.id) },
-          h("td", null, h("a", { href: `#/player/${p.id}`, class: p.note ? "" : "mono" }, p.note || shortId(p.id))),
+          h("td", null, h("a", { href: `#/player/${p.id}` }, p.note || shortId(p.id)), p.note ? h("span", { class: "id" }, shortId(p.id)) : null),
           h("td", { class: "muted", title: new Date(p.last_seen_at).toLocaleString() }, ago(p.last_seen_at)),
           h("td", { class: "num" }, p.runs),
           h("td", { class: "num" }, hm(p.play_time)),

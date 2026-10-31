@@ -36,7 +36,7 @@ function showLogin() {
   logoutButton.hidden = true;
   const input = h("input", { type: "password", name: "password", autocomplete: "current-password", required: true, placeholder: "Password" });
   const message = h("p", { class: "login-message" });
-  const form = h("form", { class: "login" }, h("h1", null, "Log in"), input, h("button", { type: "submit" }, "Enter"), message);
+  const form = h("form", { class: "login" }, h("span", { class: "label" }, "Viewer access"), input, h("button", { type: "submit", class: "button primary" }, "Enter →"), message);
   form.addEventListener("submit", async (event) => {
     event.preventDefault();
     message.textContent = "";

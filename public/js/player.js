@@ -1,10 +1,10 @@
 // #/player/:id — note, runs and machines of one player.
-import { api, date, h, hm, shortId } from "./dom.js";
+import { api, cell, date, h, hm, shortId } from "./dom.js";
 
 export async function playerView(main, id) {
   const { player, runs, sessions } = await api(`players/${id}`);
 
-  const note = h("input", { class: "note", maxlength: 200, placeholder: "Add a note (e.g. “cousin, first time”)", value: player.note });
+  const note = h("input", { class: "note", maxlength: 200, placeholder: "Add a note, e.g. “cousin, first time”", value: player.note, "aria-label": "Note" });
   const saved = h("span", { class: "muted small" });
   note.addEventListener("blur", async () => {
     if (note.value === player.note) return;
@@ -14,7 +14,7 @@ export async function playerView(main, id) {
     setTimeout(() => (saved.textContent = ""), 1500);
   });
 
-  const del = h("button", { type: "button", class: "danger" }, "Delete player");
+  const del = h("button", { type: "button", class: "button danger" }, "Delete player");
   del.addEventListener("click", async () => {
     if (!confirm("Delete this player, all their runs and screenshots? This cannot be undone.")) return;
     await api(`players/${id}`, { method: "DELETE" });
@@ -24,12 +24,19 @@ export async function playerView(main, id) {
   main.replaceChildren(
     h("p", { class: "crumbs" }, h("a", { href: "#/" }, "Players"), " / ", h("span", { class: "mono" }, shortId(id))),
     h("header", { class: "page-head" }, note, saved),
-    h("p", { class: "muted small" }, `First seen ${date(player.created_at)} · last seen ${date(player.last_seen_at)} · `, h("span", { class: "mono" }, id)),
+    h("div", { class: "cells" },
+      cell("first seen", date(player.created_at)),
+      cell("last seen", date(player.last_seen_at)),
+      cell("runs", runs.length),
+      cell("play time", hm(runs.reduce((sum, r) => sum + r.play_time, 0))),
+      cell("sessions", sessions.length),
+      cell("player id", id, "wide mono"),
+    ),
     h("h2", null, "Runs"),
     runsTable(runs),
     h("h2", null, "Machines"),
     machines(sessions),
-    h("div", { class: "danger-zone" }, del),
+    h("div", { class: "danger-zone" }, h("span", { class: "mono muted" }, `player ${id}`), del),
   );
 }
 

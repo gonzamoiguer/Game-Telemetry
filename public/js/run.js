@@ -1,5 +1,5 @@
 // #/run/:id — sticky summary + graph, then the full event timeline.
-import { api, clock, date, dur, h, hm, parseJson, shortId, span } from "./dom.js";
+import { api, cell, clock, date, dur, h, hm, parseJson, shortId, span } from "./dom.js";
 import { CATEGORIES, renderError, renderEvent } from "./events.js";
 import { createGraph } from "./graph.js";
 
@@ -84,8 +84,51 @@ function sessionTitle(session, number, first, prevLastT) {
   return { text: parts.join(" · "), rewind };
 }
 
+const pad2 = (n) => String(n).padStart(2, "0");
+
 function gutter(t, turn) {
-  return h("span", { class: "gutter" }, h("span", { class: "t" }, clock(t)), h("span", { class: "turn" }, turn === null ? "" : `T${turn}`));
+  return h("span", { class: "gutter" }, h("span", { class: "t" }, clock(t)), h("span", { class: "turn" }, turn === null ? "" : `T${pad2(turn)}`));
+}
+
+/** Unix ms → "2026-10-26 18:31:02.123" */
+function stamp(ms) {
+  if (typeof ms !== "number") return "–";
+  const d = new Date(ms);
+  return `${date(ms)}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
+}
+
+/** Key/value grid plus optional preformatted blocks; built on first open. */
+function detailPanel(fields, blocks) {
+  return h("div", { class: "detail" },
+    h("dl", null, fields.filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => [h("dt", null, k), h("dd", null, String(v))])),
+    blocks.filter(Boolean).map(([label, text]) => [h("div", { class: "detail-label" }, label), h("pre", null, text)]));
+}
+
+function eventDetail(e) {
+  const { stack, ...rest } = e.data;
+  return detailPanel(
+    [["type", e.type], ["seq", e.seq], ["t", `${e.t} s`], ["ts", stamp(e.ts)], ["session", e.s], ["segment", e.seg]],
+    [typeof stack === "string" ? ["stack", stack] : null, ["data", JSON.stringify(rest, null, 2)]],
+  );
+}
+
+function sessionDetail(s) {
+  return detailPanel(
+    [["session", s.id], ["started", stamp(s.started_at)], ["ended", s.ended_at ? stamp(s.ended_at) : "no session_end"],
+      ["clean exit", s.clean_exit ? "yes" : "no"], ["build", s.build], ["env", s.env], ["os", s.os], ["cpu", s.cpu], ["gpu", s.gpu],
+      ["ram", s.ram_mb ? `${s.ram_mb} MB` : null], ["resolution", s.resolution], ["language", s.language]],
+    [],
+  );
+}
+
+/** Click a row to toggle its raw data. Images and links keep their own click. */
+function inspectable(el, build) {
+  el.classList.add("inspectable");
+  el.addEventListener("click", (event) => {
+    if (event.target.closest("a, img, button")) return;
+    if (!el.querySelector(":scope > .detail, :scope > .body > .detail")) (el.querySelector(":scope > .body") ?? el).append(build());
+    el.classList.toggle("open");
+  });
 }
 
 /** Builds every timeline row. Returns { el, rows } where rows are in display order. */
@@ -96,6 +139,17 @@ function buildTimeline(model, data) {
   const bySession = new Map(data.sessions.map((s) => [s.id, []]));
   for (const e of model.events) bySession.get(e.s)?.push(e);
 
+  // Consecutive rows of the same turn in the same session share a group,
+  // so the whole turn lights up when the cursor is on any of its rows.
+  let group = 0;
+  let groupKey = null;
+  const push = (row, key) => {
+    if (key === null || key !== groupKey) group += 1;
+    groupKey = key;
+    rows.push({ ...row, group });
+    frag.append(row.el);
+  };
+
   let prevLastT = null;
   let lastIdx = 0;
   data.sessions.forEach((session, i) => {
@@ -105,8 +159,8 @@ function buildTimeline(model, data) {
     if (first && i > 0) model.markers.push({ t: first.t, kind: "session" });
     const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
       title.rewind ? h("span", { class: "rewind" }, title.rewind) : null);
-    frag.append(divider);
-    rows.push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.t ?? prevLastT ?? 0, cat: "other" });
+    inspectable(divider, () => sessionDetail(session));
+    push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.t ?? prevLastT ?? 0, cat: "other" }, null);
 
     for (const e of events) {
       if (e.type === "session_start") continue; // folded into the divider
@@ -121,10 +175,10 @@ function buildTimeline(model, data) {
       const r = e.type === "error" || e.type === "error_repeat" ? renderError(e) : renderEvent(e);
       if (r.badge) errors.set(`${e.s}|${e.data.message}`, { badge: r.badge, count: e.data.count ?? 1 });
       const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}` }, gutter(e.t, e.turn),
-        h("div", { class: "body" }, h("div", { class: "line" }, r.body), r.extra));
-      if (r.cat === "errors") el.addEventListener("click", () => el.classList.toggle("open"));
-      frag.append(el);
-      rows.push({ el, idx: e.idx, t: e.t, cat: r.cat });
+        h("div", { class: "body" }, h("div", { class: "line" }, r.body), r.extra),
+        h("span", { class: "type" }, e.type));
+      inspectable(el, () => eventDetail(e));
+      push({ el, idx: e.idx, t: e.t, cat: r.cat }, e.turn === null ? null : `${e.s}|${e.turn}`);
     }
 
     const last = events[events.length - 1];
@@ -135,11 +189,10 @@ function buildTimeline(model, data) {
     if (!session.clean_exit) {
       const live = i === data.sessions.length - 1 && Date.now() - data.run.last_seen_at < LIVE_MS;
       const end = live
-        ? h("div", { class: "row divider live" }, "● in progress (no session_end yet)")
-        : h("div", { class: "row divider crash" }, "✕ crashed / killed (no session_end)");
+        ? h("div", { class: "row divider live" }, "● in progress · no session_end yet")
+        : h("div", { class: "row divider crash" }, "✕ crashed / killed · no session_end");
       if (!live && last) model.markers.push({ t: last.t, kind: "crash" });
-      frag.append(end);
-      rows.push({ el: end, idx: lastIdx, t: prevLastT ?? 0, cat: "other" });
+      push({ el: end, idx: lastIdx, t: prevLastT ?? 0, cat: "other" }, null);
     }
   });
 
@@ -154,12 +207,14 @@ export async function runView(main, id) {
   const { el: timeline, rows } = buildTimeline(model, data);
   const crashes = data.sessions.filter((s) => !s.clean_exit).length;
   const run = data.run;
+  const counts = new Map();
+  for (const r of rows) counts.set(r.cat, (counts.get(r.cat) ?? 0) + 1);
 
   // Filter chips
   const hidden = new Set();
   let visible = rows;
-  const chips = h("div", { class: "chips small" }, CATEGORIES.map((cat) => {
-    const chip = h("button", { type: "button", class: `chip chip-${cat}`, "aria-pressed": "true" }, cat);
+  const chips = h("div", { class: "chips" }, CATEGORIES.map((cat) => {
+    const chip = h("button", { type: "button", class: "chip", "aria-pressed": "true" }, cat, h("span", { class: "chip-count" }, counts.get(cat) ?? 0));
     chip.addEventListener("click", () => {
       if (hidden.has(cat)) hidden.delete(cat);
       else hidden.add(cat);
@@ -172,25 +227,25 @@ export async function runView(main, id) {
   }));
 
   const graphBox = h("div", { class: "graph" });
-  const toggle = h("button", { type: "button", class: "link small" }, "hide graph");
+  const toggle = h("button", { type: "button", class: "chip", "aria-pressed": "true" }, "graph");
   toggle.addEventListener("click", () => {
     graphBox.hidden = !graphBox.hidden;
-    toggle.textContent = graphBox.hidden ? "show graph" : "hide graph";
+    toggle.setAttribute("aria-pressed", String(!graphBox.hidden));
   });
 
   const playerName = run.player_note || shortId(run.player_id);
-  const summary = h("div", { class: "summary" },
-    h("a", { href: `#/player/${run.player_id}` }, playerName),
-    h("span", null, date(run.started_at)),
-    h("span", null, h("span", { class: "mono" }, hm(run.play_time)), " played"),
-    h("span", null, "last turn ", h("span", { class: "mono" }, model.lastTurn ?? "–")),
-    h("span", null, h("span", { class: "mono" }, data.sessions.length), data.sessions.length === 1 ? " session" : " sessions"),
-    h("span", { class: crashes ? "mark-crash" : "" }, h("span", { class: "mono" }, crashes), crashes === 1 ? " crash" : " crashes"),
-    toggle,
+  const summary = h("div", { class: "cells" },
+    cell("player", h("a", { href: `#/player/${run.player_id}` }, playerName), "wide"),
+    cell("started", date(run.started_at)),
+    cell("play time", hm(run.play_time)),
+    cell("last turn", model.lastTurn ?? "–"),
+    cell("sessions", data.sessions.length),
+    cell("crashes", crashes, crashes ? "alert" : ""),
+    cell("events", data.events.length),
   );
-  const header = h("header", { class: "run-head" }, summary, graphBox, chips);
+  const header = h("header", { class: "run-head" }, summary, graphBox, h("div", { class: "toolbar" }, chips, toggle));
 
-  const del = h("button", { type: "button", class: "danger" }, "Delete run");
+  const del = h("button", { type: "button", class: "button danger" }, "Delete run");
   del.addEventListener("click", async () => {
     if (!confirm("Delete this run and its screenshots? This cannot be undone.")) return;
     await api(`runs/${id}`, { method: "DELETE" });
@@ -198,14 +253,20 @@ export async function runView(main, id) {
   });
 
   main.replaceChildren(
+    h("p", { class: "crumbs" }, h("a", { href: "#/" }, "Players"), " / ", h("a", { href: `#/player/${run.player_id}` }, playerName), " / ",
+      h("span", null, `run ${shortId(run.id)}`)),
     header,
     data.events.length ? timeline : h("p", { class: "muted" }, "No events in this run."),
-    h("p", { class: "muted small help" }, "Keys: j / k next / previous checkpoint or feedback · e next error · Esc closes a screenshot"),
-    h("div", { class: "danger-zone" }, del),
+    h("p", { class: "help" }, "J / K  next / previous checkpoint or feedback   ·   E  next error   ·   click a row for raw data   ·   ESC  close screenshot"),
+    h("div", { class: "danger-zone" }, h("span", { class: "mono muted" }, `run ${run.id}`), del),
   );
 
   // Cursor: the row at the top of the viewport, just under the sticky header.
+  // Every row of the same turn is marked "current"; the exact row is "cursor".
   let current = null;
+  const byGroup = new Map();
+  for (const r of rows) byGroup.set(r.group, [...(byGroup.get(r.group) ?? []), r]);
+  const groupRows = (g) => byGroup.get(g) ?? [];
   function currentIndex() {
     const top = header.getBoundingClientRect().bottom + 4; // rows scroll to 2px below the header
     let lo = 0;
@@ -225,8 +286,12 @@ export async function runView(main, id) {
     const row = visible[currentIndex()];
     if (!row) return;
     if (current !== row) {
-      current?.el.classList.remove("current");
-      row.el.classList.add("current");
+      if (current?.group !== row.group) {
+        if (current) for (const r of groupRows(current.group)) r.el.classList.remove("current");
+        for (const r of groupRows(row.group)) r.el.classList.add("current");
+      }
+      current?.el.classList.remove("cursor");
+      row.el.classList.add("cursor");
       current = row;
     }
     graph.setCursor(row.idx, row.t);

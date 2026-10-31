@@ -70,11 +70,9 @@ export function renderEvent(e) {
   return (renderers[e.type] ?? generic)(e.data, e);
 }
 
-/** Error rows: collapsed to the message, click to expand the stack. */
+/** Error rows: collapsed to the message; the stack is in the row's raw data (click). */
 export function renderError(e) {
   const d = e.data;
   const badge = h("span", { class: "badge" }, `×${d.count ?? 1}`);
-  const stack = h("pre", { class: "stack" }, d.stack || "(no stack)");
-  const head = h("span", { class: "error-head" }, "✕ ", h("span", { class: "error-message" }, d.message ?? "error"), " ", badge);
-  return { cat: "errors", cls: "error", body: [head], extra: stack, badge };
+  return { cat: "errors", cls: "error", body: ["✕ ", h("span", { class: "error-message" }, d.message ?? "error"), " ", badge], badge };
 }
