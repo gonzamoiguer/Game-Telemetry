@@ -16,7 +16,7 @@
       "binding": "DB",
       "database_name": "urbes-telemetry",
       // Filled in by `npm run setup`.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "fdf186c9-de79-4ede-9239-ab930d2fa0df",
       "migrations_dir": "migrations"
     }
   ],
