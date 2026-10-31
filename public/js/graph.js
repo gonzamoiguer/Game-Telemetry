@@ -4,11 +4,12 @@
 // that were later rewound over are drawn dashed and dim.
 import { hm } from "./dom.js";
 
-// Categorical series colours, fixed order, validated for CVD separation and
-// contrast on the dark surface. Every series also has its own labelled row,
-// so colour is never the only cue. Series past the sixth are drawn in grey.
-const SERIES = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
-const EXTRA = "#9a9a9a";
+// Only characters get colour: one categorical slot each, fixed order, validated
+// for CVD separation and contrast on the dark surface. Resources, and characters
+// past the sixth, are drawn in neutral grey. Every series has its own labelled row,
+// so colour is never the only cue.
+const CHARACTER_COLORS = ["#3987e5", "#d95926", "#199e70", "#c98500", "#d55181", "#9085e9"];
+const NEUTRAL = "#b4b4b1";
 
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
@@ -116,9 +117,9 @@ export function createGraph(container, model, onSeek) {
     const g = s("g");
     let top = 2;
     let slot = 0;
-    const nextColor = () => SERIES[slot++] ?? EXTRA;
+    const nextColor = () => CHARACTER_COLORS[slot++] ?? NEUTRAL;
     for (const [name, points] of model.resources) {
-      band(g, top, RES_H, points, name, (v) => String(v), nextColor());
+      band(g, top, RES_H, points, name, (v) => String(v), NEUTRAL);
       top += RES_H;
     }
     if (model.resources.size && model.lanes.size) top += GAP;
