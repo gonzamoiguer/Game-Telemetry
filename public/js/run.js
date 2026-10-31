@@ -90,47 +90,6 @@ function gutter(t, turn) {
   return h("span", { class: "gutter" }, h("span", { class: "t" }, clock(t)), h("span", { class: "turn" }, turn === null ? "" : `T${pad2(turn)}`));
 }
 
-/** Unix ms → "2026-10-26 18:31:02.123" */
-function stamp(ms) {
-  if (typeof ms !== "number") return "–";
-  const d = new Date(ms);
-  return `${date(ms)}:${pad2(d.getSeconds())}.${String(d.getMilliseconds()).padStart(3, "0")}`;
-}
-
-/** Key/value grid plus optional preformatted blocks; built on first open. */
-function detailPanel(fields, blocks) {
-  return h("div", { class: "detail" },
-    h("dl", null, fields.filter(([, v]) => v !== null && v !== undefined && v !== "").map(([k, v]) => [h("dt", null, k), h("dd", null, String(v))])),
-    blocks.filter(Boolean).map(([label, text]) => [h("div", { class: "detail-label" }, label), h("pre", null, text)]));
-}
-
-function eventDetail(e) {
-  const { stack, ...rest } = e.data;
-  return detailPanel(
-    [["type", e.type], ["seq", e.seq], ["t", `${e.t} s`], ["ts", stamp(e.ts)], ["session", e.s], ["segment", e.seg]],
-    [typeof stack === "string" ? ["stack", stack] : null, ["data", JSON.stringify(rest, null, 2)]],
-  );
-}
-
-function sessionDetail(s) {
-  return detailPanel(
-    [["session", s.id], ["started", stamp(s.started_at)], ["ended", s.ended_at ? stamp(s.ended_at) : "no session_end"],
-      ["clean exit", s.clean_exit ? "yes" : "no"], ["build", s.build], ["env", s.env], ["os", s.os], ["cpu", s.cpu], ["gpu", s.gpu],
-      ["ram", s.ram_mb ? `${s.ram_mb} MB` : null], ["resolution", s.resolution], ["language", s.language]],
-    [],
-  );
-}
-
-/** Click a row to toggle its raw data. Images and links keep their own click. */
-function inspectable(el, build) {
-  el.classList.add("inspectable");
-  el.addEventListener("click", (event) => {
-    if (event.target.closest("a, img, button")) return;
-    if (!el.querySelector(":scope > .detail, :scope > .body > .detail")) (el.querySelector(":scope > .body") ?? el).append(build());
-    el.classList.toggle("open");
-  });
-}
-
 /** Builds every timeline row. Returns { el, rows } where rows are in display order. */
 function buildTimeline(model, data) {
   const rows = [];
@@ -159,7 +118,6 @@ function buildTimeline(model, data) {
     if (first && i > 0) model.markers.push({ t: first.t, kind: "session" });
     const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
       title.rewind ? h("span", { class: "rewind" }, title.rewind) : null);
-    inspectable(divider, () => sessionDetail(session));
     push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.t ?? prevLastT ?? 0, cat: "other" }, null);
 
     for (const e of events) {
@@ -177,7 +135,6 @@ function buildTimeline(model, data) {
       const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}` }, gutter(e.t, e.turn),
         h("div", { class: "body" }, h("div", { class: "line" }, r.body), r.extra),
         h("span", { class: "type" }, e.type));
-      inspectable(el, () => eventDetail(e));
       push({ el, idx: e.idx, t: e.t, cat: r.cat }, e.turn === null ? null : `${e.s}|${e.turn}`);
     }
 
@@ -257,7 +214,7 @@ export async function runView(main, id) {
       h("span", null, `run ${shortId(run.id)}`)),
     header,
     data.events.length ? timeline : h("p", { class: "muted" }, "No events in this run."),
-    h("p", { class: "help" }, "J / K  next / previous checkpoint or feedback   ·   E  next error   ·   click a row for raw data   ·   ESC  close screenshot"),
+    h("p", { class: "help" }, "J / K  next / previous checkpoint or feedback   ·   E  next error   ·   click a row to move the cursor there   ·   ESC  close screenshot"),
     h("div", { class: "danger-zone" }, h("span", { class: "mono muted" }, `run ${run.id}`), del),
   );
 
@@ -301,9 +258,19 @@ export async function runView(main, id) {
     if (!frame) frame = requestAnimationFrame(update);
   };
 
-  function scrollToRow(row) {
-    if (row) row.el.scrollIntoView({ block: "start" });
+  function scrollToRow(row, behavior = "auto") {
+    if (row) row.el.scrollIntoView({ block: "start", behavior });
   }
+
+  // Clicking a row moves the timeline position to it; error rows also toggle their stack.
+  const rowOf = new Map(rows.map((r) => [r.el, r]));
+  timeline.addEventListener("click", (event) => {
+    if (event.target.closest("a, img, button")) return;
+    const row = rowOf.get(event.target.closest(".row"));
+    if (!row) return;
+    if (row.cat === "errors") row.el.classList.toggle("open");
+    scrollToRow(row, "smooth");
+  });
 
   /** Nearest visible row at play time t; ties prefer the cursor's segment, then proximity. */
   function seek(t) {
