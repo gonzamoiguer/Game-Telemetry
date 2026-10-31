@@ -39,7 +39,7 @@ function toHex(bytes: ArrayBuffer): string {
   return [...new Uint8Array(bytes)].map((b) => b.toString(16).padStart(2, "0")).join("");
 }
 
-function fromHex(hex: string): Uint8Array | null {
+function fromHex(hex: string): Uint8Array<ArrayBuffer> | null {
   if (!/^(?:[0-9a-f]{2})+$/.test(hex)) return null;
   const out = new Uint8Array(hex.length / 2);
   for (let i = 0; i < out.length; i++) out[i] = parseInt(hex.slice(i * 2, i * 2 + 2), 16);

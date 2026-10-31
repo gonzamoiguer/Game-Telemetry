@@ -33,10 +33,10 @@ export class HttpError extends Error {
  * Reads a request body, giving up as soon as it grows past `max` bytes.
  * Returns null when the body is too large.
  */
-export async function readBody(request: Request, max: number): Promise<Uint8Array | null> {
+export async function readBody(request: Request, max: number): Promise<Uint8Array<ArrayBuffer> | null> {
   const declared = Number(request.headers.get("Content-Length"));
   if (Number.isFinite(declared) && declared > max) return null;
-  if (!request.body) return new Uint8Array(0);
+  if (!request.body) return new Uint8Array(new ArrayBuffer(0));
 
   const reader = request.body.getReader();
   const chunks: Uint8Array[] = [];

@@ -75,7 +75,7 @@ describe("POST /api/ingest", () => {
 });
 
 describe("PUT /api/shot", () => {
-  function put(sessionId: string, seq: number, body: Uint8Array, key = KEY): Promise<Response> {
+  function put(sessionId: string, seq: number, body: Uint8Array<ArrayBuffer>, key = KEY): Promise<Response> {
     return SELF.fetch(`${BASE}/api/shot/${sessionId}/${seq}`, {
       method: "PUT",
       headers: { "X-Ingest-Key": key, "Content-Type": "image/jpeg" },
