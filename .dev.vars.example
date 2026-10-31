@@ -1,0 +1,5 @@
+# Local development secrets, used by `npm run dev` (wrangler dev).
+# `npm run dev` copies this file to .dev.vars on first run; .dev.vars is git-ignored.
+INGEST_KEY=dev-ingest-key
+SESSION_SECRET=dev-session-secret-change-me-0123456789abcdef
+VIEWER_PASSWORD=dev

@@ -1,0 +1,25 @@
+{
+  "name": "urbes-telemetry",
+  "private": true,
+  "type": "module",
+  "description": "Playtest telemetry server for Urbes en Urgencia (Cloudflare Worker + D1 + R2)",
+  "scripts": {
+    "setup": "node scripts/setup.mjs",
+    "dev": "node scripts/dev.mjs",
+    "deploy": "node scripts/deploy.mjs",
+    "seed": "node scripts/seed.mjs",
+    "smoke": "node scripts/smoke.mjs",
+    "test": "vitest run",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.8.71",
+    "@cloudflare/workers-types": "^4.20250927.0",
+    "typescript": "^5.9.2",
+    "vitest": "~3.2.4",
+    "wrangler": "^4.40.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}

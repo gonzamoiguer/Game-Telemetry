@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "urbes-telemetry",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  "workers_dev": true,
+  // The Worker runs first for every request so it can add security headers
+  // to the viewer files and route /api/* itself.
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "run_worker_first": true
+  },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "urbes-telemetry",
+      // Filled in by `npm run setup`.
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "SHOTS",
+      "bucket_name": "urbes-telemetry-shots"
+    }
+  ],
+  "observability": {
+    "enabled": true
+  }
+}
