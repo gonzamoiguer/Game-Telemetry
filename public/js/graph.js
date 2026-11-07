@@ -14,7 +14,7 @@ const NEUTRAL = "#b4b4b1";
 
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
-const LANE_H = 22;
+const LANE_H = 28;
 const GAP = 6;
 const AXIS_H = 20;
 
@@ -156,7 +156,21 @@ export function createGraph(container, model, onSeek) {
     for (const [name, lane] of model.lanes) {
       g.append(s("line", { x1: x0, x2: x1, y1: top + LANE_H - 1.5, y2: top + LANE_H - 1.5, class: "g-lane-base" }));
       const color = nextColor();
-      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color) : null;
+      // Influence runs: the per-turn total (rises and falls), readout "L1 4/6" = level, progress/target.
+      // Older runs only have level-ups: a step per level.
+      const format = lane.mode === "influence"
+        ? (v, p) => `L${p.level ?? "?"} ${p.target ? `${p.progress}/${p.target}` : "max"}`
+        : (v) => `L${v}`;
+      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, format, color) : null;
+      if (y && lane.mode === "influence") {
+        for (let i = 1; i < lane.points.length; i++) {
+          const p = lane.points[i];
+          if (!(p.level > lane.points[i - 1].level)) continue;
+          const tick = s("line", { x1: x(p.t), x2: x(p.t), y1: y(p.v) - 5, y2: y(p.v) + 5, stroke: color, class: "g-level-tick" });
+          tick.append(s("title", {}, `reached level ${p.level}`));
+          g.append(tick);
+        }
+      }
       if (!y) g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
       // Marks sit on the character's line at that moment (its influence level), not on the row.
       const lineY = (idx) => {
@@ -250,7 +264,7 @@ export function createGraph(container, model, onSeek) {
     cursor.setAttribute("x2", cx);
     for (const r of readouts) {
       const i = lastAtOrBefore(r.points, idx);
-      r.el.textContent = i >= 0 ? r.format(r.points[i].v) : "";
+      r.el.textContent = i >= 0 ? r.format(r.points[i].v, r.points[i]) : "";
     }
   }
 

@@ -79,6 +79,14 @@ class Session {
 
   /** Emits an event after `dt` seconds of active play. */
   emit(type, data, dt = 0) {
+    // Influence state follows the characters: appear at 0, level up resets progress.
+    const infl = this.game.influence;
+    if (type === "character_appeared") infl[data.character] = { level: 0, progress: 0, target: 6, base: 0 };
+    if (type === "character_left") delete infl[data.character];
+    if (type === "influence_level_up" && infl[data.character]) {
+      const c = infl[data.character];
+      Object.assign(c, { base: c.base + c.target, level: data.level, progress: 0, target: c.target + 2 });
+    }
     this.game.t += dt;
     this.ts += dt * 1000;
     this.events.push({ seq: ++this.seq, t: Math.round(this.game.t * 100) / 100, ts: Math.round(this.ts), type, data });
@@ -101,7 +109,13 @@ class Session {
     for (let i = 0; i < count; i++) {
       g.turn += 1;
       for (const k of Object.keys(g.res)) g.res[k] += k === "Materials" ? 4 : k === "Electricity" ? 2 : 0;
-      this.emit("turn", { turn: g.turn, hand: Math.max(1, Math.round(between(2, 6))), res: { ...g.res } }, between(4, 8));
+      // Influence wanders up and down below the next level's target.
+      const influence = {};
+      for (const [name, c] of Object.entries(g.influence)) {
+        c.progress = Math.max(-6, Math.min(c.target - 1, c.progress + Math.round(between(-3, 3.4))));
+        influence[name] = { level: c.level, progress: c.progress, target: c.target, total: c.base + c.progress, discontent: c.progress < -3 };
+      }
+      this.emit("turn", { turn: g.turn, hand: Math.max(1, Math.round(between(2, 6))), res: { ...g.res }, influence }, between(4, 8));
       const plays = rand() < 0.5 ? 1 : 2;
       for (let p = 0; p < plays; p++) {
         const [card, kind, cost] = pick(CARDS);
@@ -128,12 +142,13 @@ function newGame(label, player, startedAt) {
     t: 0,
     turn: 0,
     res: { Materials: 30, Electricity: 10, Trash: 4 },
+    influence: {},
     sessions: [],
   };
 }
 
 function snapshot(game) {
-  return { t: game.t, turn: game.turn, res: { ...game.res } };
+  return { t: game.t, turn: game.turn, res: { ...game.res }, influence: structuredClone(game.influence) };
 }
 
 const BUILD_OLD = "2026-10-24 18:40 (a41f0c2)";
@@ -212,6 +227,7 @@ const s2End = s.ts;
 // Session 3: reloads the save from turn 11 (t rewinds), then crashes.
 g1.turn = save.turn;
 g1.res = save.res;
+g1.influence = save.influence;
 s = new Session(g1, { label: "run-1/s3", startedAt: s2End + 4000, machine: DESKTOP, build: BUILD, resumed: true, gapS: Math.round((s2End - s2Start) / 1000), loadedT: save.t });
 g1.sessions.push(s);
 s.play(5, {
