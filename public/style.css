@@ -143,8 +143,8 @@ input:focus { outline: none; border-color: var(--text); }
 .g-line { fill: none; stroke-width: 1.6; }
 .g-lane-base { stroke: var(--line); }
 .g-out { opacity: 0.5; }
-.g-grievance.hollow { fill: var(--bg); stroke-width: 1.6; }
-.g-reload { fill: var(--text-2); font: 11px var(--sans); }
+.g-icon-backdrop { fill: var(--bg); }
+.g-reload { color: var(--text-2); }
 .g-session { stroke: var(--line-strong); stroke-dasharray: 1 3; }
 .g-tick { stroke: var(--text-3); }
 .g-tick-label { fill: var(--text-3); font: 10px var(--mono); }

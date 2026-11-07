@@ -3,6 +3,7 @@
 // timeline. Time is the replay clock (only moves forward); a save reload is a
 // ↺ on the axis, not a jump back.
 import { hm } from "./dom.js";
+import { ICONS } from "./icons.js";
 
 // Only characters get colour: one categorical slot each, fixed order, validated
 // for CVD separation and contrast on the dark surface. Resources, and characters
@@ -22,6 +23,21 @@ function s(tag, attrs = {}, text) {
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   if (text !== undefined) el.textContent = text;
   return el;
+}
+
+/**
+ * A Phosphor icon centred on (cx, cy), `size` px square, filled with `color`, with hover text.
+ * `backdrop` puts a page-coloured disc behind it so the lane line doesn't show through the
+ * icon's cut-outs (the tick / cross).
+ */
+function icon(name, cx, cy, size, color, title, cls, backdrop = false) {
+  const g = s("g", { class: cls });
+  if (title) g.append(s("title", {}, title));
+  if (backdrop) g.append(s("circle", { cx, cy, r: size * 0.42, class: "g-icon-backdrop" }));
+  const svg = s("svg", { x: cx - size / 2, y: cy - size / 2, width: size, height: size, viewBox: "0 0 256 256" });
+  svg.append(s("path", { d: ICONS[name], fill: color }));
+  g.append(svg);
+  return g;
 }
 
 /** Index of the last point whose event index is <= idx, or -1. */
@@ -118,9 +134,9 @@ export function createGraph(container, model, onSeek) {
         const mx = x(mark.t);
         const mid = top + LANE_H / 2;
         let el;
-        if (mark.kind === "mended") el = s("circle", { cx: mx, cy: mid, r: 3.5, fill: color, class: "g-grievance" });
-        else if (mark.kind === "broke") el = s("circle", { cx: mx, cy: mid, r: 3.5, stroke: color, class: "g-grievance hollow" });
-        else {
+        if (mark.kind === "mended" || mark.kind === "broke") {
+          el = icon(mark.kind === "mended" ? "checkCircleFill" : "xCircleFill", mx, mid, 14, color, null, "g-grievance", true);
+        } else {
           const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
           el = s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" });
         }
@@ -142,9 +158,7 @@ export function createGraph(container, model, onSeek) {
       const mx = x(m.t);
       if (m.kind === "session") g.append(s("line", { x1: mx, x2: mx, y1: 0, y2: plotBottom, class: "g-session" }));
       else if (m.kind === "reload") {
-        const mark = s("text", { x: mx, y: top + 8, class: "g-reload", "text-anchor": "middle" }, "↺");
-        mark.append(s("title", {}, "loaded an older save"));
-        g.append(mark);
+        g.append(icon("floppyDisk", mx, top + 5, 12, "currentColor", "loaded an older save", "g-reload"));
       }
       else if (m.kind === "feedback") g.append(s("circle", { cx: mx, cy: top + 3, r: 3.5, class: "g-feedback" }));
       else if (m.kind === "error") g.append(s("line", { x1: mx, x2: mx, y1: top - 2, y2: top + 7, class: "g-error" }));

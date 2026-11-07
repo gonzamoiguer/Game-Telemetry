@@ -57,7 +57,8 @@ function buildModel(data) {
       } else if (e.type === "character_left") l.marks.push({ t: x, kind: "out" });
       else if (e.type === "influence_level_up" && typeof d.level === "number") point(d.level);
       else if (e.type === "grievance" && GRIEVANCE_END.has(d.phase)) {
-        l.marks.push({ t: x, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${d.phase}` });
+        const outcome = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" }[d.phase];
+        l.marks.push({ t: x, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${outcome}` });
       }
     }
     if (e.type === "feedback") markers.push({ t: x, kind: "feedback" });
