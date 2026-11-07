@@ -3,18 +3,23 @@ import { api, cell, clock, date, dur, h, hm, parseJson, shortId, span } from "./
 import { CATEGORIES, renderError, renderEvent } from "./events.js";
 import { createGraph } from "./graph.js";
 
-const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation"]);
+const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation", "grievance"]);
+// Grievance phases that end one: the moment the relationship breaks or mends, one dot on the lane.
+const GRIEVANCE_END = new Set(["resolved", "refused", "timeout", "dropped"]);
 const LIVE_MS = 10 * 60 * 1000;
 
-/** Derives segments, turns, resource series, influence lanes and markers. */
+/**
+ * Derives turns, resource series, character lanes and markers on the REPLAY clock `x`: the play time
+ * as the player lived it, which only moves forward. The game's own clock `t` belongs to the save and
+ * goes back when an older save is loaded; there the replay just carries on, with a ↺ marker.
+ */
 function buildModel(data) {
   const events = data.events.map((e, idx) => ({ ...e, idx, data: parseJson(e.data) }));
   const resources = new Map();
   const lanes = new Map();
   const markers = [];
-  const segEnd = [0];
-  let seg = 0;
   let prevT = null;
+  let x = 0;
   let turn = null;
   let lastTurn = null;
 
@@ -24,13 +29,12 @@ function buildModel(data) {
   };
 
   for (const e of events) {
-    if (prevT !== null && e.t < prevT - 0.001) {
-      seg += 1;
-      segEnd.push(e.t);
+    if (prevT !== null) {
+      if (e.t < prevT - 0.001) markers.push({ t: x, kind: "reload" });
+      else x += e.t - prevT;
     }
-    e.seg = seg;
-    segEnd[seg] = Math.max(segEnd[seg], e.t);
     prevT = e.t;
+    e.x = x;
 
     const d = e.data;
     if ((e.type === "turn" || e.type === "card_played") && typeof d.turn === "number") turn = d.turn;
@@ -41,29 +45,26 @@ function buildModel(data) {
       for (const [name, value] of Object.entries(d.res)) {
         if (typeof value !== "number") continue;
         if (!resources.has(name)) resources.set(name, []);
-        resources.get(name).push({ t: e.t, v: value, seg, idx: e.idx });
+        resources.get(name).push({ t: x, v: value, idx: e.idx });
       }
     }
     if (CHARACTER_TYPES.has(e.type) && typeof d.character === "string") {
       const l = lane(d.character);
-      const point = (v) => l.points.push({ t: e.t, v, seg, idx: e.idx });
+      const point = (v) => l.points.push({ t: x, v, idx: e.idx });
       if (e.type === "character_appeared") {
-        l.marks.push({ t: e.t, kind: "in" });
+        l.marks.push({ t: x, kind: "in" });
         if (!l.points.length) point(0);
-      } else if (e.type === "character_left") l.marks.push({ t: e.t, kind: "out" });
+      } else if (e.type === "character_left") l.marks.push({ t: x, kind: "out" });
       else if (e.type === "influence_level_up" && typeof d.level === "number") point(d.level);
+      else if (e.type === "grievance" && GRIEVANCE_END.has(d.phase)) {
+        l.marks.push({ t: x, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${d.phase}` });
+      }
     }
-    if (e.type === "feedback") markers.push({ t: e.t, kind: "feedback" });
-    if (e.type === "error") markers.push({ t: e.t, kind: "error" });
+    if (e.type === "feedback") markers.push({ t: x, kind: "feedback" });
+    if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  // segStart[k] is where segment k began; history in segment k after the
-  // earliest later restart point was overwritten by a reload.
-  const segStart = [0];
-  for (const e of events) if (segStart.length <= e.seg) segStart.push(e.t);
-  const cutAfter = segStart.map((_, k) => Math.min(Infinity, ...segStart.slice(k + 1)));
-  const maxT = Math.max(1, ...events.map((e) => e.t));
-  return { events, resources, lanes, markers, segEnd, cutAfter, maxT, lastTurn };
+  return { events, resources, lanes, markers, maxT: Math.max(1, x), lastTurn };
 }
 
 /** Text for a session divider. */
@@ -109,16 +110,17 @@ function buildTimeline(model, data) {
     frag.append(row.el);
   };
 
-  let prevLastT = null;
+  let prevLastT = null; // the save's clock, for "rewound …" in the divider
+  let lastX = 0;
   let lastIdx = 0;
   data.sessions.forEach((session, i) => {
     const events = bySession.get(session.id) ?? [];
     const first = events[0];
     const title = sessionTitle(session, i + 1, first, prevLastT);
-    if (first && i > 0) model.markers.push({ t: first.t, kind: "session" });
+    if (first && i > 0) model.markers.push({ t: first.x, kind: "session" });
     const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
       title.rewind ? h("span", { class: "rewind" }, title.rewind) : null);
-    push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.t ?? prevLastT ?? 0, cat: "other" }, null);
+    push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.x ?? lastX, cat: "other" }, null);
 
     for (const e of events) {
       if (e.type === "session_start") continue; // folded into the divider
@@ -132,15 +134,16 @@ function buildTimeline(model, data) {
       }
       const r = e.type === "error" || e.type === "error_repeat" ? renderError(e) : renderEvent(e);
       if (r.badge) errors.set(`${e.s}|${e.data.message}`, { badge: r.badge, count: e.data.count ?? 1 });
-      const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}` }, gutter(e.t, e.turn),
+      const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}` }, gutter(e.x, e.turn),
         h("div", { class: "body" }, h("div", { class: "line" }, r.body), r.extra),
         h("span", { class: "type" }, e.type));
-      push({ el, idx: e.idx, t: e.t, cat: r.cat }, e.turn === null ? null : `${e.s}|${e.turn}`);
+      push({ el, idx: e.idx, t: e.x, cat: r.cat }, e.turn === null ? null : `${e.s}|${e.turn}`);
     }
 
     const last = events[events.length - 1];
     if (last) {
       prevLastT = last.t;
+      lastX = last.x;
       lastIdx = last.idx;
     }
     if (!session.clean_exit) {
@@ -148,8 +151,8 @@ function buildTimeline(model, data) {
       const end = live
         ? h("div", { class: "row divider live" }, "● in progress · no session_end yet")
         : h("div", { class: "row divider crash" }, "✕ crashed / killed · no session_end");
-      if (!live && last) model.markers.push({ t: last.t, kind: "crash" });
-      push({ el: end, idx: lastIdx, t: prevLastT ?? 0, cat: "other" }, null);
+      if (!live && last) model.markers.push({ t: last.x, kind: "crash" });
+      push({ el: end, idx: lastIdx, t: lastX, cat: "other" }, null);
     }
   });
 
@@ -272,14 +275,13 @@ export async function runView(main, id) {
     scrollToRow(row, "smooth");
   });
 
-  /** Nearest visible row at play time t; ties prefer the cursor's segment, then proximity. */
+  /** Nearest visible row at replay time t; ties prefer rows near the cursor. */
   function seek(t) {
     const here = current ?? visible[0];
-    const segOf = (r) => model.events[r.idx]?.seg ?? 0;
     let best = null;
     let bestScore = Infinity;
     for (const r of visible) {
-      const score = Math.abs(r.t - t) + (segOf(r) === segOf(here) ? 0 : 0.5) + Math.abs(r.idx - here.idx) * 1e-6;
+      const score = Math.abs(r.t - t) + Math.abs(r.idx - here.idx) * 1e-6;
       if (score < bestScore) {
         bestScore = score;
         best = r;

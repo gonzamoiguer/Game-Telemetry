@@ -1,7 +1,7 @@
 // Hand-rolled SVG strip for the run page: one sparkline per resource, one
 // influence lane per character, a marker axis, and a cursor that follows the
-// timeline. When t rewinds (a save reload) a new segment starts; segments
-// that were later rewound over are drawn dashed and dim.
+// timeline. Time is the replay clock (only moves forward); a save reload is a
+// ↺ on the axis, not a jump back.
 import { hm } from "./dom.js";
 
 // Only characters get colour: one categorical slot each, fixed order, validated
@@ -46,9 +46,9 @@ function niceStep(maxT, width) {
 }
 
 /**
- * model: { maxT, segEnd: number[], cutAfter: number[], resources: Map<name, points>,
- *          lanes: Map<name, { points, marks }>, markers: [{ t, kind }] }
- * points: [{ t, v, seg, idx }] in event order.
+ * model: { maxT, resources: Map<name, points>, lanes: Map<name, { points, marks }>, markers: [{ t, kind }] }
+ * points: [{ t, v, idx }] in event order. Lane marks: in / out (appeared, left) and mended / broke
+ * (a grievance resolved, or refused / out of turns / dropped), with an optional hover title.
  */
 export function createGraph(container, model, onSeek) {
   let width = 0;
@@ -59,31 +59,18 @@ export function createGraph(container, model, onSeek) {
   let cursorIdx = 0;
   let cursorT = 0;
 
-  /**
-   * Step-line path(s) for one series. A point is "abandoned" when a later
-   * segment (a reloaded save) restarts at or before its t: that stretch of
-   * history was overwritten, so it is drawn dashed.
-   */
-  function stepPaths(points, y) {
-    let solid = "";
-    let dashed = "";
-    const X = (t) => x(t).toFixed(1);
+  /** Step-line path for one series, held until the end of the run. */
+  function stepPath(points, y) {
+    let d = "";
     for (let i = 0; i < points.length; i++) {
       const p = points[i];
-      const prev = points[i - 1];
       const next = points[i + 1];
-      const cut = model.cutAfter[p.seg];
-      const end = next && next.seg === p.seg ? next.t : model.segEnd[p.seg];
       const py = y(p.v).toFixed(1);
-      if (prev && prev.seg === p.seg) {
-        const v = `M${X(p.t)},${y(prev.v).toFixed(1)}V${py}`;
-        if (p.t <= cut) solid += v;
-        else dashed += v;
-      }
-      if (p.t < cut) solid += `M${X(p.t)},${py}H${X(Math.min(end, cut))}`;
-      if (end > cut) dashed += `M${X(Math.max(p.t, cut))},${py}H${X(end)}`;
+      if (i > 0) d += `V${py}`;
+      else d += `M${x(p.t).toFixed(1)},${py}`;
+      d += `H${x(next ? next.t : model.maxT).toFixed(1)}`;
     }
-    return [solid, dashed];
+    return d;
   }
 
   function band(g, top, height, points, label, format, color) {
@@ -93,12 +80,11 @@ export function createGraph(container, model, onSeek) {
     lo = Math.min(0, lo);
     if (hi === lo) hi = lo + 1;
     const y = (v) => top + height - 2 - ((v - lo) / (hi - lo)) * (height - 4);
-    const [solid, dashed] = stepPaths(points, y);
+    const path = stepPath(points, y);
     const mid = top + height / 2;
     g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
     g.append(s("text", { x: 14, y: mid + 4, class: "g-label" }, label));
-    if (dashed) g.append(s("path", { d: dashed, stroke: color, class: "g-line abandoned" }));
-    if (solid) g.append(s("path", { d: solid, stroke: color, class: "g-line" }));
+    if (path) g.append(s("path", { d: path, stroke: color, class: "g-line" }));
     const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
     readouts.push({ el: readout, points, format });
@@ -131,14 +117,21 @@ export function createGraph(container, model, onSeek) {
       for (const mark of lane.marks) {
         const mx = x(mark.t);
         const mid = top + LANE_H / 2;
-        const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
-        g.append(s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" }));
+        let el;
+        if (mark.kind === "mended") el = s("circle", { cx: mx, cy: mid, r: 3.5, fill: color, class: "g-grievance" });
+        else if (mark.kind === "broke") el = s("circle", { cx: mx, cy: mid, r: 3.5, stroke: color, class: "g-grievance hollow" });
+        else {
+          const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
+          el = s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" });
+        }
+        if (mark.title) el.append(s("title", {}, mark.title));
+        g.append(el);
       }
       top += LANE_H;
     }
     const plotBottom = top;
 
-    // Axis: time ticks plus markers for sessions, feedback, errors and crashes.
+    // Axis: time ticks plus markers for sessions, save reloads, feedback, errors and crashes.
     top += 4;
     const step = niceStep(model.maxT, x1 - x0);
     for (let t = 0; t <= model.maxT; t += step) {
@@ -148,6 +141,11 @@ export function createGraph(container, model, onSeek) {
     for (const m of model.markers) {
       const mx = x(m.t);
       if (m.kind === "session") g.append(s("line", { x1: mx, x2: mx, y1: 0, y2: plotBottom, class: "g-session" }));
+      else if (m.kind === "reload") {
+        const mark = s("text", { x: mx, y: top + 8, class: "g-reload", "text-anchor": "middle" }, "↺");
+        mark.append(s("title", {}, "loaded an older save"));
+        g.append(mark);
+      }
       else if (m.kind === "feedback") g.append(s("circle", { cx: mx, cy: top + 3, r: 3.5, class: "g-feedback" }));
       else if (m.kind === "error") g.append(s("line", { x1: mx, x2: mx, y1: top - 2, y2: top + 7, class: "g-error" }));
       else if (m.kind === "crash") g.append(s("text", { x: mx, y: top + 7, class: "g-crash", "text-anchor": "middle" }, "✕"));
