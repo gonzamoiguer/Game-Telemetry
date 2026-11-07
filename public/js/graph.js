@@ -47,7 +47,8 @@ function niceStep(maxT, width) {
 
 /**
  * model: { maxT, segEnd: number[], cutAfter: number[], resources: Map<name, points>,
- *          lanes: Map<name, { points, marks }>, markers: [{ t, kind }] }
+ *          lanes: Map<name, { points, marks, spans }>, markers: [{ t, kind }] }
+ * spans: grievances, [{ t0 (null = began before this run's data), t1, seg, grievance, outcome }]
  * points: [{ t, v, seg, idx }] in event order.
  */
 export function createGraph(container, model, onSeek) {
@@ -104,6 +105,30 @@ export function createGraph(container, model, onSeek) {
     readouts.push({ el: readout, points, format });
   }
 
+  /**
+   * A grievance on a character lane, the breakpoint in the relationship: a tick where it fired, a
+   * bracket while it was open, and the outcome at its end. Shape, not colour, tells the outcome:
+   * filled dot = resolved, hollow dot = refused / out of turns, small cross = dropped, nothing = still
+   * open (or cut off by a reload). Hover for the details.
+   */
+  function grievanceSpan(g, span, top, color) {
+    const mid = top + LANE_H / 2;
+    const abandoned = span.t1 > model.cutAfter[span.seg] ? " abandoned" : "";
+    const group = s("g", { class: `g-grievance${abandoned}` });
+    const label = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped", open: "unresolved" }[span.outcome] ?? span.outcome;
+    group.append(s("title", {}, `Grievance ${span.grievance ?? "?"}: ${label}`));
+    const x1 = x(span.t1);
+    if (span.t0 !== null) {
+      const x0 = x(span.t0);
+      group.append(s("line", { x1: x0, x2: x0, y1: top + 1, y2: top + LANE_H - 1, stroke: color, class: "g-grievance-start" }));
+      group.append(s("line", { x1: x0, x2: x1, y1: mid, y2: mid, stroke: color, class: "g-grievance-span" }));
+    }
+    if (span.outcome === "resolved") group.append(s("circle", { cx: x1, cy: mid, r: 3.5, fill: color, class: "g-grievance-end" }));
+    else if (span.outcome === "refused" || span.outcome === "timeout") group.append(s("circle", { cx: x1, cy: mid, r: 3.5, stroke: color, class: "g-grievance-end hollow" }));
+    else if (span.outcome === "dropped") group.append(s("path", { d: `M${x1 - 3},${mid - 3}L${x1 + 3},${mid + 3}M${x1 - 3},${mid + 3}L${x1 + 3},${mid - 3}`, stroke: color, class: "g-grievance-end cross" }));
+    g.append(group);
+  }
+
   function render() {
     width = container.clientWidth;
     if (width === 0) return;
@@ -128,6 +153,7 @@ export function createGraph(container, model, onSeek) {
       const color = nextColor();
       if (lane.points.length) band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color);
       else g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      for (const span of lane.spans ?? []) grievanceSpan(g, span, top, color);
       for (const mark of lane.marks) {
         const mx = x(mark.t);
         const mid = top + LANE_H / 2;

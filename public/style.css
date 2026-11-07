@@ -144,6 +144,11 @@ input:focus { outline: none; border-color: var(--text); }
 .g-line.abandoned { stroke-dasharray: 2 3; opacity: 0.45; }
 .g-lane-base { stroke: var(--line); }
 .g-out { opacity: 0.5; }
+.g-grievance-start { stroke-width: 2; }
+.g-grievance-span { stroke-width: 1; stroke-dasharray: 3 2; opacity: 0.7; }
+.g-grievance-end.hollow { fill: var(--bg); stroke-width: 1.6; }
+.g-grievance-end.cross { fill: none; stroke-width: 1.6; }
+.g-grievance.abandoned { opacity: 0.45; }
 .g-session { stroke: var(--line-strong); stroke-dasharray: 1 3; }
 .g-tick { stroke: var(--text-3); }
 .g-tick-label { fill: var(--text-3); font: 10px var(--mono); }
@@ -180,6 +185,9 @@ input:focus { outline: none; border-color: var(--text); }
 .divider.live { color: var(--text-2); border-top: 1px dashed var(--line-strong); margin-top: 4px; }
 
 .row.idle { color: var(--amber); }
+/* Grievances: the fire and outcome rows are breakpoints in a relationship. */
+.row.breakpoint, .row.good, .row.bad { border-left-color: var(--line-strong); }
+.row.bad { color: var(--amber); }
 .row.checkpoint .fps { color: var(--text-3); font: 11.5px var(--mono); }
 .row.feedback { background: var(--feedback-soft); border-left-color: var(--feedback); padding-top: 10px; padding-bottom: 10px; margin: 6px 0; }
 .feedback-label { color: var(--feedback); font: 600 10.5px var(--mono); text-transform: uppercase; letter-spacing: 0.1em; margin-right: 10px; }
@@ -202,6 +210,7 @@ input:focus { outline: none; border-color: var(--text); }
 .timeline.hide-characters .cat-characters,
 .timeline.hide-turns .cat-turns,
 .timeline.hide-situations .cat-situations,
+.timeline.hide-shop .cat-shop,
 .timeline.hide-errors .cat-errors,
 .timeline.hide-idle .cat-idle,
 .timeline.hide-checkpoints .cat-checkpoints,

@@ -2,7 +2,7 @@
 // `cat` drives the filter chips; "other" rows are always shown.
 import { dur, h, screenshot } from "./dom.js";
 
-export const CATEGORIES = ["cards", "characters", "turns", "situations", "errors", "idle", "checkpoints", "feedback"];
+export const CATEGORIES = ["cards", "characters", "turns", "situations", "shop", "errors", "idle", "checkpoints", "feedback"];
 
 const b = (text) => h("b", null, text);
 
@@ -10,6 +10,65 @@ const b = (text) => h("b", null, text);
 function resText(res) {
   if (!res || typeof res !== "object") return "";
   return Object.entries(res).map(([name, value]) => `${name} ${value}`).join(" · ");
+}
+
+/** "Dinero 30 · Materiales 5" for a cost, or "free". */
+function costText(cost) {
+  return cost && typeof cost === "object" && Object.keys(cost).length ? resText(cost) : "free";
+}
+
+/** "Dinero −20 · Basura +3" */
+function deltaText(delta) {
+  if (!delta || typeof delta !== "object") return "";
+  return Object.entries(delta).map(([name, v]) => `${name} ${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)}`).join(" · ");
+}
+
+const list = (a) => (Array.isArray(a) && a.length ? a.join(", ") : "");
+
+const GRIEVANCE_PHASE = {
+  fired: "has a grievance",
+  hunt: "sent the player looking",
+  found: "problem found",
+  postponed: "player said “not now”",
+  resolved: "resolved",
+  refused: "player refused",
+  timeout: "ran out of turns",
+  dropped: "dropped (character gone)",
+};
+
+function grievance(d) {
+  const phase = GRIEVANCE_PHASE[d.phase] ?? String(d.phase ?? "?");
+  const rel = typeof d.relationship === "number" ? ` · relationship ${d.relationship.toFixed(2)}${d.band ? ` (${d.band})` : ""}` : "";
+  const parts = [b(d.character ?? "?"), " · grievance ", b(d.grievance ?? "?"), " · ", phase];
+  if (d.phase === "fired") {
+    if (typeof d.turn_limit === "number") parts.push(` · ${d.turn_limit} turns`);
+    if (d.target) parts.push(` · at ${d.target}`);
+    if (Array.isArray(d.choices)) {
+      const choices = d.choices.filter(Boolean).map((c) => (c.kind === "fix" ? `fix ${costText(c.cost)}${c.affordable === false ? " (can't afford)" : ""}` : c.kind));
+      if (choices.length) parts.push(` · choices: ${choices.join(" / ")}`);
+    }
+  } else if (d.phase === "resolved") {
+    parts.push(` · paid ${costText(d.paid)}`);
+  } else if (typeof d.turns_left === "number" && d.phase !== "dropped") {
+    parts.push(` · ${d.turns_left} turns left`);
+  }
+  if (d.consequence) parts.push(` · ${d.consequence === "leave" ? "character leaves" : d.consequence.replace(/^dislike:?/, "new dislike ")}`);
+  parts.push(rel);
+  const cls = d.phase === "resolved" ? "good" : d.phase === "refused" || d.phase === "timeout" ? "bad" : d.phase === "fired" ? "breakpoint" : "";
+  return { cat: "situations", cls, body: withRes(d, parts) };
+}
+
+function shopBuy(d) {
+  const parts = ["Bought ", b(d.item ?? "?"), d.kind === "offer" ? " (offer)" : " (card)", " at ", d.shop ?? "?"];
+  if (d.character) parts.push(` (${d.character})`);
+  parts.push(` · price ${costText(d.price)}`);
+  const delta = deltaText(d.delta);
+  if (delta) parts.push(` · Δ ${delta}`);
+  if (list(d.cards_in)) parts.push(" · in: ", list(d.cards_in));
+  if (list(d.cards_out)) parts.push(" · out: ", list(d.cards_out));
+  if (typeof d.left === "number") parts.push(d.left < 0 ? "" : ` · ${d.left} left`);
+  if (typeof d.hand === "number") parts.push(` · hand ${d.hand}${typeof d.hand_size === "number" ? `/${d.hand_size}` : ""}`);
+  return { cat: "shop", body: withRes(d, parts) };
 }
 
 function withRes(d, nodes) {
@@ -45,6 +104,16 @@ const renderers = {
     ],
   }),
   protest: (d) => ({ cat: "situations", body: [d.active ? "Protest started" : "Protest ended"] }),
+  grievance,
+  shop: (d) => ({
+    cat: "shop",
+    cls: d.phase === "close" ? "dim" : "",
+    body: d.phase === "close"
+      ? ["Left ", d.shop ?? "shop", ` · bought ${d.bought ?? 0}`]
+      : withRes(d, ["Opened ", b(d.shop ?? "shop"), d.character ? ` (${d.character})` : "",
+        typeof d.hand === "number" ? ` · hand ${d.hand}${typeof d.hand_size === "number" ? `/${d.hand_size}` : ""}` : ""]),
+  }),
+  shop_buy: shopBuy,
   checkpoint: (d, e) => ({
     cat: "checkpoints",
     cls: "checkpoint",

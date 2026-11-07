@@ -3,7 +3,9 @@ import { api, cell, clock, date, dur, h, hm, parseJson, shortId, span } from "./
 import { CATEGORIES, renderError, renderEvent } from "./events.js";
 import { createGraph } from "./graph.js";
 
-const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation"]);
+const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation", "grievance"]);
+// Grievance phases that end one: the span on the character's lane closes with an outcome dot.
+const GRIEVANCE_END = new Set(["resolved", "refused", "timeout", "dropped"]);
 const LIVE_MS = 10 * 60 * 1000;
 
 /** Derives segments, turns, resource series, influence lanes and markers. */
@@ -17,9 +19,10 @@ function buildModel(data) {
   let prevT = null;
   let turn = null;
   let lastTurn = null;
+  const openGrievance = new Map(); // character → { t0, seg, grievance }
 
   const lane = (name) => {
-    if (!lanes.has(name)) lanes.set(name, { points: [], marks: [] });
+    if (!lanes.has(name)) lanes.set(name, { points: [], marks: [], spans: [] });
     return lanes.get(name);
   };
 
@@ -52,10 +55,27 @@ function buildModel(data) {
         if (!l.points.length) point(0);
       } else if (e.type === "character_left") l.marks.push({ t: e.t, kind: "out" });
       else if (e.type === "influence_level_up" && typeof d.level === "number") point(d.level);
+      else if (e.type === "grievance") {
+        // A grievance is a breakpoint in the relationship: a span from when it fires to its outcome.
+        // One that a save reload cut off ends where its segment ends, without an outcome.
+        const open = openGrievance.get(d.character);
+        if (d.phase === "fired") {
+          if (open) l.spans.push({ ...open, t1: null, outcome: "open" });
+          openGrievance.set(d.character, { t0: e.t, seg, grievance: d.grievance });
+        } else if (GRIEVANCE_END.has(d.phase)) {
+          if (open && open.seg !== seg) l.spans.push({ ...open, t1: null, outcome: "open" });
+          const same = open && open.seg === seg && open.grievance === d.grievance;
+          l.spans.push({ t0: same ? open.t0 : null, t1: e.t, seg, grievance: d.grievance, outcome: d.phase });
+          openGrievance.delete(d.character);
+        }
+      }
     }
     if (e.type === "feedback") markers.push({ t: e.t, kind: "feedback" });
     if (e.type === "error") markers.push({ t: e.t, kind: "error" });
   }
+
+  for (const [name, open] of openGrievance) lane(name).spans.push({ ...open, t1: null, outcome: "open" });
+  for (const l of lanes.values()) for (const span of l.spans) if (span.t1 === null) span.t1 = segEnd[span.seg];
 
   // segStart[k] is where segment k began; history in segment k after the
   // earliest later restart point was overwritten by a reload.

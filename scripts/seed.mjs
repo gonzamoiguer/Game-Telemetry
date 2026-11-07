@@ -147,6 +147,8 @@ const INDEX = {
   stack: "ProtestController.PickSlogan () (at Assets/Scripts/Events/ProtestController.cs:41)\nProtestController.Update () (at Assets/Scripts/Events/ProtestController.cs:23)",
 };
 
+const LEAK = { grievance: "Grievance_Nely_Leak", character: "Nely" };
+
 // ---------------------------------------------------------------- player 1, run 1 (the long one)
 const run1Start = NOW - 5 * DAY;
 const g1 = newGame("run-1", "player-1", run1Start);
@@ -185,10 +187,18 @@ s.play(7, {
     x.emit("situation", { situation: "EmptyHand_Nely", character: "Nely", phase: "chosen", offer: 1 }, 9);
     x.emit("character_gave", { character: "Nely", cards: ["Kiosco", "Plaza"] }, 1);
   },
-  13: (x) => x.idle(412),
+  13: (x) => {
+    x.idle(412);
+    x.emit("grievance", { ...LEAK, phase: "fired", turn: 13, turns_left: 4, turn_limit: 4, relationship: -0.71, band: "Conflict",
+      target: "a pipe", choices: [{ kind: "fix", cost: { Dinero: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
+    x.emit("grievance", { ...LEAK, phase: "hunt", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 8);
+  },
   14: (x) => {
     x.emit("protest", { active: true }, 6);
     x.emit("influence_level_up", { character: "Tito", level: 1 }, 5);
+    x.emit("grievance", { ...LEAK, phase: "found", turn: 14, turns_left: 3, relationship: -0.74, band: "Conflict" }, 4);
+    x.emit("grievance", { ...LEAK, phase: "refused", turn: 14, turns_left: 3, relationship: -0.74, band: "Conflict",
+      choice: 1, choice_kind: "refuse", consequence: "dislike:Ruido", res: { ...g1.res } }, 6);
   },
   15: (x) => {
     x.emit("protest", { active: false }, 10);
@@ -206,12 +216,23 @@ s = new Session(g1, { label: "run-1/s3", startedAt: s2End + 4000, machine: DESKT
 g1.sessions.push(s);
 s.play(5, {
   12: (x) => x.emit("situation", { situation: "EmptyHand_Nely", character: "Nely", phase: "chosen", offer: 2 }, 6),
-  13: (x) => x.emit("influence_level_up", { character: "Nely", level: 2 }, 3),
+  13: (x) => {
+    x.emit("influence_level_up", { character: "Nely", level: 2 }, 3);
+    x.emit("grievance", { ...LEAK, phase: "fired", turn: 13, turns_left: 4, turn_limit: 4, relationship: -0.71, band: "Conflict",
+      target: "a pipe", choices: [{ kind: "fix", cost: { Dinero: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
+    x.emit("grievance", { ...LEAK, phase: "hunt", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 5);
+    x.emit("grievance", { ...LEAK, phase: "found", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 9);
+    x.emit("grievance", { ...LEAK, phase: "postponed", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict", res: { ...g1.res } }, 3);
+  },
   14: (x) => {
     x.emit("protest", { active: true }, 4);
     x.emit("error", { ...INDEX, count: 1 }, 2);
   },
-  15: (x) => x.emit("error_repeat", { message: INDEX.message, count: 5 }, 1),
+  15: (x) => {
+    x.emit("error_repeat", { message: INDEX.message, count: 5 }, 1);
+    x.emit("grievance", { ...LEAK, phase: "resolved", turn: 15, turns_left: 2, relationship: 0, band: "Neutral",
+      choice: 0, choice_kind: "fix", paid: { Dinero: 25 }, res: { ...g1.res } }, 7);
+  },
 });
 s.checkpoint();
 // …no session_end: the game crashed.
@@ -235,7 +256,24 @@ s.play(12, {
   2: (x) => x.emit("character_appeared", { character: "Nely" }, 4),
   4: (x) => x.emit("influence_level_up", { character: "Nely", level: 1 }, 2),
   6: (x) => x.emit("debug_marker", { note: "tester pressed F9", scene: "Main" }, 1),
+  7: (x) => {
+    const shop = { shop: "Shop_Ambassador", character: "Embajador", turn: 7 };
+    x.emit("shop", { ...shop, phase: "open", hand: 5, hand_size: 7, res: { ...g3.res } }, 3);
+    x.emit("shop_buy", { ...shop, kind: "card", item: "Plaza", index: 0, price: { Dinero: 15 }, delta: { Dinero: -15 },
+      cards_in: ["Plaza"], cards_out: [], left: null, hand: 6, hand_size: 7, res: { ...g3.res } }, 6);
+    x.emit("shop_buy", { ...shop, kind: "offer", item: "ExchangeOffer", index: 2, price: { Dinero: 10 }, delta: { Dinero: -10 },
+      cards_in: ["Farol", "Kiosco"], cards_out: ["Plaza", "Banco"], left: 0, hand: 6, hand_size: 7, res: { ...g3.res } }, 5);
+    x.emit("shop", { ...shop, phase: "close", bought: 2 }, 4);
+  },
   8: (x) => x.emit("character_gave", { character: "Nely", cards: ["Farol"] }, 2),
+  10: (x) => {
+    const g = { grievance: "Grievance_Nely_Lamp", character: "Nely" };
+    x.emit("grievance", { ...g, phase: "fired", turn: 10, turns_left: 3, turn_limit: 3, relationship: -0.8, band: "Conflict", target: "Farol",
+      choices: [{ kind: "fix", cost: { Materiales: 40 }, affordable: false }] }, 2);
+    x.emit("grievance", { ...g, phase: "hunt", turn: 10, turns_left: 3, relationship: -0.8, band: "Conflict" }, 6);
+  },
+  12: (x) => x.emit("grievance", { grievance: "Grievance_Nely_Lamp", character: "Nely", phase: "timeout", turn: 12, turns_left: 0,
+    relationship: -0.9, band: "Conflict", consequence: "leave" }, 1),
 });
 s.checkpoint();
 s.end("quit");
