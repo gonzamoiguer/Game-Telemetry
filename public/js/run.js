@@ -26,7 +26,7 @@ function buildModel(data) {
   let lastTurn = null;
 
   const lane = (name) => {
-    // points: influence levels (older runs); influence: the per-turn total, preferred when present.
+    // points: the level (steps at level-ups); influence: the per-turn total, drawn faintly behind.
     if (!lanes.has(name)) lanes.set(name, { points: [], influence: [], marks: [], grievances: [] });
     return lanes.get(name);
   };
@@ -99,10 +99,6 @@ function buildModel(data) {
     if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  for (const l of lanes.values()) {
-    l.mode = l.influence.length ? "influence" : "level";
-    if (l.influence.length) l.points = l.influence;
-  }
   return { events, resources, lanes, markers, protests, maxT: Math.max(1, x), lastTurn };
 }
 

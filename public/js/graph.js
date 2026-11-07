@@ -89,7 +89,8 @@ export function createGraph(container, model, onSeek) {
     return d;
   }
 
-  function band(g, top, height, points, label, format, color, iconName) {
+  /** `readoutPoints`: what the value readout follows, when not the plotted points. */
+  function band(g, top, height, points, label, format, color, iconName, readoutPoints = points) {
     const values = points.map((p) => p.v);
     let lo = Math.min(...values);
     let hi = Math.max(...values);
@@ -104,7 +105,7 @@ export function createGraph(container, model, onSeek) {
     if (path) g.append(s("path", { d: path, stroke: color, class: "g-line" }));
     const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
-    readouts.push({ el: readout, points, format });
+    readouts.push({ el: readout, points: readoutPoints, format });
     return y;
   }
 
@@ -156,21 +157,20 @@ export function createGraph(container, model, onSeek) {
     for (const [name, lane] of model.lanes) {
       g.append(s("line", { x1: x0, x2: x1, y1: top + LANE_H - 1.5, y2: top + LANE_H - 1.5, class: "g-lane-base" }));
       const color = nextColor();
-      // Influence runs: the per-turn total (rises and falls), readout "L1 4/6" = level, progress/target.
-      // Older runs only have level-ups: a step per level.
-      const format = lane.mode === "influence"
+      // Behind the level steps, faint and on its own scale: influence turn by turn (rises and falls).
+      const inf = lane.influence ?? [];
+      if (inf.length) {
+        const values = inf.map((p) => p.v);
+        const lo = Math.min(...values);
+        const hi = Math.max(...values) === lo ? lo + 1 : Math.max(...values);
+        const yi = (v) => top + LANE_H - 3 - ((v - lo) / (hi - lo)) * (LANE_H - 6);
+        g.append(s("path", { d: stepPath(inf, yi), stroke: color, class: "g-influence" }));
+      }
+      // Readout: "L1 4/6" (level, influence progress / target) when influence was sent, else "L1".
+      const format = inf.length
         ? (v, p) => `L${p.level ?? "?"} ${p.target ? `${p.progress}/${p.target}` : "max"}`
         : (v) => `L${v}`;
-      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, format, color) : null;
-      if (y && lane.mode === "influence") {
-        for (let i = 1; i < lane.points.length; i++) {
-          const p = lane.points[i];
-          if (!(p.level > lane.points[i - 1].level)) continue;
-          const tick = s("line", { x1: x(p.t), x2: x(p.t), y1: y(p.v) - 5, y2: y(p.v) + 5, stroke: color, class: "g-level-tick" });
-          tick.append(s("title", {}, `reached level ${p.level}`));
-          g.append(tick);
-        }
-      }
+      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, format, color, undefined, inf.length ? inf : lane.points) : null;
       if (!y) g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
       // Marks sit on the character's line at that moment (its influence level), not on the row.
       const lineY = (idx) => {
