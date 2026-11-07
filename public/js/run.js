@@ -54,13 +54,13 @@ function buildModel(data) {
       const l = lane(d.character);
       const point = (v) => l.points.push({ t: x, v, idx: e.idx });
       if (e.type === "character_appeared") {
-        l.marks.push({ t: x, kind: "in" });
+        l.marks.push({ t: x, idx: e.idx, kind: "in" });
         if (!l.points.length) point(0);
-      } else if (e.type === "character_left") l.marks.push({ t: x, kind: "out" });
+      } else if (e.type === "character_left") l.marks.push({ t: x, idx: e.idx, kind: "out" });
       else if (e.type === "influence_level_up" && typeof d.level === "number") point(d.level);
       else if (e.type === "grievance" && GRIEVANCE_END.has(d.phase)) {
         const outcome = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" }[d.phase];
-        l.marks.push({ t: x, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${outcome}` });
+        l.marks.push({ t: x, idx: e.idx, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${outcome}` });
       }
     }
     if (e.type === "protest") {

@@ -14,7 +14,7 @@ const NEUTRAL = "#b4b4b1";
 
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
-const LANE_H = 16;
+const LANE_H = 22;
 const GAP = 6;
 const AXIS_H = 20;
 
@@ -105,6 +105,7 @@ export function createGraph(container, model, onSeek) {
     const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
     readouts.push({ el: readout, points, format });
+    return y;
   }
 
   function render() {
@@ -129,11 +130,13 @@ export function createGraph(container, model, onSeek) {
     for (const [name, lane] of model.lanes) {
       g.append(s("line", { x1: x0, x2: x1, y1: top + LANE_H - 1.5, y2: top + LANE_H - 1.5, class: "g-lane-base" }));
       const color = nextColor();
-      if (lane.points.length) band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color);
-      else g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color) : null;
+      if (!y) g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
       for (const mark of lane.marks) {
         const mx = x(mark.t);
-        const mid = top + LANE_H / 2;
+        // Centred on the character's line at that moment (its influence level), not on the row.
+        const at = y && typeof mark.idx === "number" ? lastAtOrBefore(lane.points, mark.idx) : -1;
+        const mid = at >= 0 ? y(lane.points[at].v) : top + LANE_H / 2;
         let el;
         if (mark.kind === "mended" || mark.kind === "broke") {
           el = icon(mark.kind === "mended" ? "checkCircle" : "xCircle", mx, mid, 14, color, null, "g-grievance", true);
