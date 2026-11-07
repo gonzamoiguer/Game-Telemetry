@@ -110,8 +110,8 @@ export function createGraph(container, model, onSeek) {
 
   /**
    * A grievance as a section of the character's line, drawn like a protest: an angry face where it
-   * fires, the line thickened while it is open, and a face for the outcome where it ends (happy =
-   * resolved, angry = refused / out of turns / dropped). No end face while it is still open.
+   * fires, a band along the line while it is open, and the outcome where it ends: check = resolved,
+   * cross = refused / out of turns / dropped. No end mark while it is still open (or cut by a reload).
    */
   function grievance(g, gv, lane, y, lineY, top, color) {
     const t0 = gv.t0 ?? 0;
@@ -129,7 +129,7 @@ export function createGraph(container, model, onSeek) {
     }
     if (gv.outcome) {
       const ok = gv.outcome === "resolved";
-      g.append(icon(ok ? "smiley" : "smileyAngry", x(t1), lineY(gv.i1), 14, color, `${what}: ${OUTCOME[gv.outcome] ?? gv.outcome}`, "g-grievance", true));
+      g.append(icon(ok ? "checkCircle" : "xCircle", x(t1), lineY(gv.i1), 14, color, `${what}: ${OUTCOME[gv.outcome] ?? gv.outcome}`, "g-grievance", true));
     }
   }
   let clipSeq = 0;
