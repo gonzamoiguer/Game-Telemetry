@@ -2,6 +2,7 @@
 import { api, cell, clock, date, dur, h, hm, parseJson, shortId, span } from "./dom.js";
 import { CATEGORIES, renderError, renderEvent } from "./events.js";
 import { createGraph } from "./graph.js";
+import { iconSvg } from "./icons.js";
 
 const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation", "grievance"]);
 // Grievance phases that end one: the moment the relationship breaks or mends, one dot on the lane.
@@ -11,13 +12,14 @@ const LIVE_MS = 10 * 60 * 1000;
 /**
  * Derives turns, resource series, character lanes and markers on the REPLAY clock `x`: the play time
  * as the player lived it, which only moves forward. The game's own clock `t` belongs to the save and
- * goes back when an older save is loaded; there the replay just carries on, with a ↺ marker.
+ * goes back when an older save is loaded; there the replay just carries on, with a save (floppy disk) marker.
  */
 function buildModel(data) {
   const events = data.events.map((e, idx) => ({ ...e, idx, data: parseJson(e.data) }));
   const resources = new Map();
   const lanes = new Map();
   const markers = [];
+  const protests = []; // { t0, t1 (null = still on), cause }
   let prevT = null;
   let x = 0;
   let turn = null;
@@ -61,11 +63,18 @@ function buildModel(data) {
         l.marks.push({ t: x, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${outcome}` });
       }
     }
+    if (e.type === "protest") {
+      const open = protests.at(-1);
+      if (d.active) {
+        if (open && open.t1 === null) open.t1 = x; // a reload can skip an end
+        protests.push({ t0: x, t1: null, cause: typeof d.cause === "string" ? d.cause : null });
+      } else if (open && open.t1 === null) open.t1 = x;
+    }
     if (e.type === "feedback") markers.push({ t: x, kind: "feedback" });
     if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  return { events, resources, lanes, markers, maxT: Math.max(1, x), lastTurn };
+  return { events, resources, lanes, markers, protests, maxT: Math.max(1, x), lastTurn };
 }
 
 /** Text for a session divider. */
@@ -81,7 +90,7 @@ function sessionTitle(session, number, first, prevLastT) {
   let rewind = null;
   const loaded = typeof start.loaded_t === "number" ? start.loaded_t : first?.t;
   if (prevLastT !== null && typeof loaded === "number" && loaded < prevLastT - 1) {
-    rewind = `↺ reloaded save, rewound ${dur(prevLastT - loaded)}`;
+    rewind = `reloaded save, rewound ${dur(prevLastT - loaded)}`;
   }
   return { text: parts.join(" · "), rewind };
 }
@@ -120,7 +129,7 @@ function buildTimeline(model, data) {
     const title = sessionTitle(session, i + 1, first, prevLastT);
     if (first && i > 0) model.markers.push({ t: first.x, kind: "session" });
     const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
-      title.rewind ? h("span", { class: "rewind" }, title.rewind) : null);
+      title.rewind ? h("span", { class: "rewind" }, iconSvg("floppyDisk", 12), title.rewind) : null);
     push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.x ?? lastX, cat: "other" }, null);
 
     for (const e of events) {

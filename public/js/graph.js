@@ -3,7 +3,7 @@
 // timeline. Time is the replay clock (only moves forward); a save reload is a
 // ↺ on the axis, not a jump back.
 import { hm } from "./dom.js";
-import { ICONS } from "./icons.js";
+import { ICONS, RESOURCE_ICONS } from "./icons.js";
 
 // Only characters get colour: one categorical slot each, fixed order, validated
 // for CVD separation and contrast on the dark surface. Resources, and characters
@@ -89,7 +89,7 @@ export function createGraph(container, model, onSeek) {
     return d;
   }
 
-  function band(g, top, height, points, label, format, color) {
+  function band(g, top, height, points, label, format, color, iconName) {
     const values = points.map((p) => p.v);
     let lo = Math.min(...values);
     let hi = Math.max(...values);
@@ -98,8 +98,9 @@ export function createGraph(container, model, onSeek) {
     const y = (v) => top + height - 2 - ((v - lo) / (hi - lo)) * (height - 4);
     const path = stepPath(points, y);
     const mid = top + height / 2;
-    g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
-    g.append(s("text", { x: 14, y: mid + 4, class: "g-label" }, label));
+    if (iconName) g.append(icon(iconName, 6, mid, 12, color, null, "g-label-icon"));
+    else g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
+    g.append(s("text", { x: iconName ? 17 : 14, y: mid + 4, class: "g-label" }, label));
     if (path) g.append(s("path", { d: path, stroke: color, class: "g-line" }));
     const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
@@ -121,7 +122,7 @@ export function createGraph(container, model, onSeek) {
     let slot = 0;
     const nextColor = () => CHARACTER_COLORS[slot++] ?? NEUTRAL;
     for (const [name, points] of model.resources) {
-      band(g, top, RES_H, points, name, (v) => String(v), NEUTRAL);
+      band(g, top, RES_H, points, name, (v) => String(v), NEUTRAL, RESOURCE_ICONS[name]);
       top += RES_H;
     }
     if (model.resources.size && model.lanes.size) top += GAP;
@@ -135,13 +136,29 @@ export function createGraph(container, model, onSeek) {
         const mid = top + LANE_H / 2;
         let el;
         if (mark.kind === "mended" || mark.kind === "broke") {
-          el = icon(mark.kind === "mended" ? "checkCircleFill" : "xCircleFill", mx, mid, 14, color, null, "g-grievance", true);
+          el = icon(mark.kind === "mended" ? "checkCircle" : "xCircle", mx, mid, 14, color, null, "g-grievance", true);
         } else {
           const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
           el = s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" });
         }
         if (mark.title) el.append(s("title", {}, mark.title));
         g.append(el);
+      }
+      top += LANE_H;
+    }
+
+    // Protests: a fist where one starts, a thin line while it lasts, a dimmer fist where it ends.
+    if (model.protests.length) {
+      top += GAP;
+      const mid = top + LANE_H / 2;
+      g.append(icon("handFist", 6, mid, 12, "currentColor", null, "g-protest"));
+      g.append(s("text", { x: 17, y: mid + 4, class: "g-label" }, "protest"));
+      for (const p of model.protests) {
+        const why = p.cause ? ` over ${p.cause}` : "";
+        const end = p.t1 ?? model.maxT;
+        g.append(s("line", { x1: x(p.t0), x2: x(end), y1: mid, y2: mid, class: "g-protest-span" }));
+        if (p.t1 !== null) g.append(icon("handFist", x(p.t1), mid, 12, "currentColor", "protest ended", "g-protest ended", true));
+        g.append(icon("handFist", x(p.t0), mid, 13, "currentColor", `protest started${why}`, "g-protest", true));
       }
       top += LANE_H;
     }

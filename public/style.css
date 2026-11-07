@@ -144,6 +144,16 @@ input:focus { outline: none; border-color: var(--text); }
 .g-lane-base { stroke: var(--line); }
 .g-out { opacity: 0.5; }
 .g-icon-backdrop { fill: var(--bg); }
+.g-protest { color: var(--amber); }
+.g-protest.ended { opacity: 0.55; }
+.g-protest-span { stroke: var(--amber); stroke-width: 1.5; opacity: 0.6; }
+
+/* Inline icons in timeline rows (resources, protest). */
+.ico { display: inline-block; vertical-align: -2px; margin-right: 3px; }
+.rv { white-space: nowrap; }
+.rv + .rv { margin-left: 8px; }
+.row.protest { border-left-color: var(--amber); }
+.row.protest .protest-ico { color: var(--amber); margin-right: 6px; }
 .g-reload { color: var(--text-2); }
 .g-session { stroke: var(--line-strong); stroke-dasharray: 1 3; }
 .g-tick { stroke: var(--text-3); }

@@ -51,15 +51,15 @@ const MAC = {
 };
 
 const CARDS = [
-  ["Casa Chorizo", "building", { Dinero: -6, Materiales: -3, Vecinos: 2 }],
-  ["Kiosco", "building", { Dinero: -4, Materiales: -2 }],
-  ["Plaza", "building", { Materiales: -4, Ánimo: 3 }],
-  ["Banco de plaza", "furniture", { Materiales: -1, Ánimo: 1 }],
-  ["Farol", "furniture", { Dinero: -2, Ánimo: 1 }],
-  ["Asamblea barrial", "action", { Ánimo: 2 }],
-  ["Colecta", "action", { Dinero: 5, Ánimo: -1 }],
+  ["Casa Chorizo", "building", { Materials: -6, Electricity: -3, Trash: 2 }],
+  ["Kiosco", "building", { Materials: -4, Electricity: -2 }],
+  ["Plaza", "building", { Electricity: -4 }],
+  ["Banco de plaza", "furniture", { Electricity: -1 }],
+  ["Farol", "furniture", { Materials: -2 }],
+  ["Asamblea barrial", "action", { Trash: -2 }],
+  ["Colecta", "action", { Materials: 5 }],
   ["Nely", "character", {}],
-  ["Volquete", "other", { Materiales: 4 }],
+  ["Volquete", "other", { Electricity: 4 }],
 ];
 
 const shots = []; // { session, seq, label }
@@ -100,7 +100,7 @@ class Session {
     const g = this.game;
     for (let i = 0; i < count; i++) {
       g.turn += 1;
-      for (const k of Object.keys(g.res)) g.res[k] += k === "Dinero" ? 4 : k === "Materiales" ? 2 : 0;
+      for (const k of Object.keys(g.res)) g.res[k] += k === "Materials" ? 4 : k === "Electricity" ? 2 : 0;
       this.emit("turn", { turn: g.turn, hand: Math.max(1, Math.round(between(2, 6))), res: { ...g.res } }, between(4, 8));
       const plays = rand() < 0.5 ? 1 : 2;
       for (let p = 0; p < plays; p++) {
@@ -127,7 +127,7 @@ function newGame(label, player, startedAt) {
     run: { id: guid(label), started_at: startedAt },
     t: 0,
     turn: 0,
-    res: { Dinero: 30, Materiales: 10, Vecinos: 4, Ánimo: 5 },
+    res: { Materials: 30, Electricity: 10, Trash: 4 },
     sessions: [],
   };
 }
@@ -190,18 +190,18 @@ s.play(7, {
   13: (x) => {
     x.idle(412);
     x.emit("grievance", { ...LEAK, phase: "fired", turn: 13, turns_left: 4, turn_limit: 4, relationship: -0.71, band: "Conflict",
-      target: "a pipe", choices: [{ kind: "fix", cost: { Dinero: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
+      target: "a pipe", choices: [{ kind: "fix", cost: { Materials: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
     x.emit("grievance", { ...LEAK, phase: "hunt", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 8);
   },
   14: (x) => {
-    x.emit("protest", { active: true }, 6);
+    x.emit("protest", { active: true, turn: 14, cause: "Trash" }, 6);
     x.emit("influence_level_up", { character: "Tito", level: 1 }, 5);
     x.emit("grievance", { ...LEAK, phase: "found", turn: 14, turns_left: 3, relationship: -0.74, band: "Conflict" }, 4);
     x.emit("grievance", { ...LEAK, phase: "refused", turn: 14, turns_left: 3, relationship: -0.74, band: "Conflict",
       choice: 1, choice_kind: "refuse", consequence: "dislike:Ruido", res: { ...g1.res } }, 6);
   },
   15: (x) => {
-    x.emit("protest", { active: false }, 10);
+    x.emit("protest", { active: false, turn: 15, cause: null }, 10);
     x.emit("character_left", { character: "Tito" }, 3);
   },
   16: (x) => x.emit("influence_level_up", { character: "Nely", level: 2 }, 4),
@@ -219,19 +219,19 @@ s.play(5, {
   13: (x) => {
     x.emit("influence_level_up", { character: "Nely", level: 2 }, 3);
     x.emit("grievance", { ...LEAK, phase: "fired", turn: 13, turns_left: 4, turn_limit: 4, relationship: -0.71, band: "Conflict",
-      target: "a pipe", choices: [{ kind: "fix", cost: { Dinero: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
+      target: "a pipe", choices: [{ kind: "fix", cost: { Materials: 25 }, affordable: true }, { kind: "refuse", cost: null, affordable: true }] }, 2);
     x.emit("grievance", { ...LEAK, phase: "hunt", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 5);
     x.emit("grievance", { ...LEAK, phase: "found", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict" }, 9);
     x.emit("grievance", { ...LEAK, phase: "postponed", turn: 13, turns_left: 4, relationship: -0.71, band: "Conflict", res: { ...g1.res } }, 3);
   },
   14: (x) => {
-    x.emit("protest", { active: true }, 4);
+    x.emit("protest", { active: true, turn: 14, cause: "Electricity" }, 4);
     x.emit("error", { ...INDEX, count: 1 }, 2);
   },
   15: (x) => {
     x.emit("error_repeat", { message: INDEX.message, count: 5 }, 1);
     x.emit("grievance", { ...LEAK, phase: "resolved", turn: 15, turns_left: 2, relationship: 0, band: "Neutral",
-      choice: 0, choice_kind: "fix", paid: { Dinero: 25 }, res: { ...g1.res } }, 7);
+      choice: 0, choice_kind: "fix", paid: { Materials: 25 }, res: { ...g1.res } }, 7);
   },
 });
 s.checkpoint();
@@ -259,9 +259,9 @@ s.play(12, {
   7: (x) => {
     const shop = { shop: "Shop_Ambassador", character: "Embajador", turn: 7 };
     x.emit("shop", { ...shop, phase: "open", hand: 5, hand_size: 7, res: { ...g3.res } }, 3);
-    x.emit("shop_buy", { ...shop, kind: "card", item: "Plaza", index: 0, price: { Dinero: 15 }, delta: { Dinero: -15 },
+    x.emit("shop_buy", { ...shop, kind: "card", item: "Plaza", index: 0, price: { Materials: 15 }, delta: { Materials: -15 },
       cards_in: ["Plaza"], cards_out: [], left: null, hand: 6, hand_size: 7, res: { ...g3.res } }, 6);
-    x.emit("shop_buy", { ...shop, kind: "offer", item: "ExchangeOffer", index: 2, price: { Dinero: 10 }, delta: { Dinero: -10 },
+    x.emit("shop_buy", { ...shop, kind: "offer", item: "ExchangeOffer", index: 2, price: { Materials: 10 }, delta: { Materials: -10 },
       cards_in: ["Farol", "Kiosco"], cards_out: ["Plaza", "Banco"], left: 0, hand: 6, hand_size: 7, res: { ...g3.res } }, 5);
     x.emit("shop", { ...shop, phase: "close", bought: 2 }, 4);
   },
@@ -269,7 +269,7 @@ s.play(12, {
   10: (x) => {
     const g = { grievance: "Grievance_Nely_Lamp", character: "Nely" };
     x.emit("grievance", { ...g, phase: "fired", turn: 10, turns_left: 3, turn_limit: 3, relationship: -0.8, band: "Conflict", target: "Farol",
-      choices: [{ kind: "fix", cost: { Materiales: 40 }, affordable: false }] }, 2);
+      choices: [{ kind: "fix", cost: { Electricity: 40 }, affordable: false }] }, 2);
     x.emit("grievance", { ...g, phase: "hunt", turn: 10, turns_left: 3, relationship: -0.8, band: "Conflict" }, 6);
   },
   12: (x) => x.emit("grievance", { grievance: "Grievance_Nely_Lamp", character: "Nely", phase: "timeout", turn: 12, turns_left: 0,
