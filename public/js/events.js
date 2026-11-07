@@ -1,27 +1,28 @@
 // One small renderer per event type. Each returns { cat, cls?, body, extra? }.
 // `cat` drives the filter chips; "other" rows are always shown.
 import { dur, h, screenshot } from "./dom.js";
+import { iconSvg, RESOURCE_ICONS } from "./icons.js";
 
 export const CATEGORIES = ["cards", "characters", "turns", "situations", "shop", "errors", "idle", "checkpoints", "feedback"];
 
 const b = (text) => h("b", null, text);
 
-/** "Dinero 30 · Materiales 5" */
-function resText(res) {
-  if (!res || typeof res !== "object") return "";
-  return Object.entries(res).map(([name, value]) => `${name} ${value}`).join(" · ");
+const hasEntries = (o) => o && typeof o === "object" && Object.keys(o).length > 0;
+
+/** [wall-icon 30, lightning-icon 5]: one item per resource, its icon (or name) then the value. */
+function resNodes(res, format = (v) => String(v)) {
+  if (!hasEntries(res)) return [];
+  return Object.entries(res).map(([name, value]) => {
+    const icon = RESOURCE_ICONS[name];
+    return h("span", { class: "rv", title: name }, icon ? iconSvg(icon, 13) : `${name} `, format(value));
+  });
 }
 
-/** "Dinero 30 · Materiales 5" for a cost, or "free". */
-function costText(cost) {
-  return cost && typeof cost === "object" && Object.keys(cost).length ? resText(cost) : "free";
-}
+/** A cost as resource items, or "free". */
+const costNodes = (cost) => (hasEntries(cost) ? resNodes(cost) : "free");
 
-/** "Dinero −20 · Basura +3" */
-function deltaText(delta) {
-  if (!delta || typeof delta !== "object") return "";
-  return Object.entries(delta).map(([name, v]) => `${name} ${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)}`).join(" · ");
-}
+/** A resource change: wall-icon −20, trash-icon +3 */
+const deltaNodes = (delta) => resNodes(delta, (v) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${Math.abs(v)}`);
 
 const list = (a) => (Array.isArray(a) && a.length ? a.join(", ") : "");
 
@@ -44,11 +45,11 @@ function grievance(d) {
     if (typeof d.turn_limit === "number") parts.push(` · ${d.turn_limit} turns`);
     if (d.target) parts.push(` · at ${d.target}`);
     if (Array.isArray(d.choices)) {
-      const choices = d.choices.filter(Boolean).map((c) => (c.kind === "fix" ? `fix ${costText(c.cost)}${c.affordable === false ? " (can't afford)" : ""}` : c.kind));
-      if (choices.length) parts.push(` · choices: ${choices.join(" / ")}`);
+      const choices = d.choices.filter(Boolean).map((c) => (c.kind === "fix" ? ["fix ", costNodes(c.cost), c.affordable === false ? " (can't afford)" : ""] : c.kind));
+      if (choices.length) parts.push(" · choices: ", choices.flatMap((c, i) => (i ? [" / ", c] : [c])));
     }
   } else if (d.phase === "resolved") {
-    parts.push(` · paid ${costText(d.paid)}`);
+    parts.push(" · paid ", costNodes(d.paid));
   } else if (typeof d.turns_left === "number" && d.phase !== "dropped") {
     parts.push(` · ${d.turns_left} turns left`);
   }
@@ -61,9 +62,8 @@ function grievance(d) {
 function shopBuy(d) {
   const parts = ["Bought ", b(d.item ?? "?"), d.kind === "offer" ? " (offer)" : " (card)", " at ", d.shop ?? "?"];
   if (d.character) parts.push(` (${d.character})`);
-  parts.push(` · price ${costText(d.price)}`);
-  const delta = deltaText(d.delta);
-  if (delta) parts.push(` · Δ ${delta}`);
+  parts.push(" · price ", costNodes(d.price));
+  if (hasEntries(d.delta)) parts.push(" · Δ ", deltaNodes(d.delta));
   if (list(d.cards_in)) parts.push(" · in: ", list(d.cards_in));
   if (list(d.cards_out)) parts.push(" · out: ", list(d.cards_out));
   if (typeof d.left === "number") parts.push(d.left < 0 ? "" : ` · ${d.left} left`);
@@ -72,8 +72,7 @@ function shopBuy(d) {
 }
 
 function withRes(d, nodes) {
-  const res = resText(d.res);
-  return res ? [nodes, h("span", { class: "res" }, res)] : nodes;
+  return hasEntries(d.res) ? [nodes, h("span", { class: "res" }, resNodes(d.res))] : nodes;
 }
 
 const END_REASON = { quit: "quit the game", title: "went back to the title screen", load: "loaded a save" };
@@ -89,7 +88,7 @@ const renderers = {
   turn: (d) => ({
     cat: "turns",
     cls: "dim",
-    body: [`Turn ${d.turn ?? "?"}`, typeof d.hand === "number" ? ` · hand ${d.hand}` : "", d.res ? ` · ${resText(d.res)}` : ""],
+    body: [`Turn ${d.turn ?? "?"}`, typeof d.hand === "number" ? ` · hand ${d.hand}` : "", hasEntries(d.res) ? [" · ", resNodes(d.res)] : ""],
   }),
   character_appeared: (d) => ({ cat: "characters", body: [b(d.character ?? "?"), " appeared"] }),
   character_left: (d) => ({ cat: "characters", body: [b(d.character ?? "?"), " left"] }),
@@ -103,7 +102,11 @@ const renderers = {
       d.phase === "chosen" ? ` · chose option ${d.offer ?? "?"}` : " · offered",
     ],
   }),
-  protest: (d) => ({ cat: "situations", body: [d.active ? "Protest started" : "Protest ended"] }),
+  protest: (d) => ({
+    cat: "situations",
+    cls: d.active ? "protest" : "protest dim",
+    body: [iconSvg("handFist", 14, "ico protest-ico"), d.active ? b("Protest started") : "Protest ended", d.active && d.cause ? ` · over ${d.cause}` : ""],
+  }),
   grievance,
   shop: (d) => ({
     cat: "shop",

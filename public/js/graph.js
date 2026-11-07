@@ -3,6 +3,7 @@
 // timeline. Time is the replay clock (only moves forward); a save reload is a
 // ↺ on the axis, not a jump back.
 import { hm } from "./dom.js";
+import { ICONS, RESOURCE_ICONS } from "./icons.js";
 
 // Only characters get colour: one categorical slot each, fixed order, validated
 // for CVD separation and contrast on the dark surface. Resources, and characters
@@ -13,7 +14,7 @@ const NEUTRAL = "#b4b4b1";
 
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
-const LANE_H = 16;
+const LANE_H = 22;
 const GAP = 6;
 const AXIS_H = 20;
 
@@ -22,6 +23,21 @@ function s(tag, attrs = {}, text) {
   for (const [k, v] of Object.entries(attrs)) el.setAttribute(k, String(v));
   if (text !== undefined) el.textContent = text;
   return el;
+}
+
+/**
+ * A Phosphor icon centred on (cx, cy), `size` px square, filled with `color`, with hover text.
+ * `backdrop` puts a page-coloured disc behind it so the lane line doesn't show through the
+ * icon's cut-outs (eyes, mouth, fingers).
+ */
+function icon(name, cx, cy, size, color, title, cls, backdrop = false) {
+  const g = s("g", { class: cls });
+  if (title) g.append(s("title", {}, title));
+  if (backdrop) g.append(s("circle", { cx, cy, r: size * 0.42, class: "g-icon-backdrop" }));
+  const svg = s("svg", { x: cx - size / 2, y: cy - size / 2, width: size, height: size, viewBox: "0 0 256 256" });
+  svg.append(s("path", { d: ICONS[name], fill: color }));
+  g.append(svg);
+  return g;
 }
 
 /** Index of the last point whose event index is <= idx, or -1. */
@@ -73,7 +89,7 @@ export function createGraph(container, model, onSeek) {
     return d;
   }
 
-  function band(g, top, height, points, label, format, color) {
+  function band(g, top, height, points, label, format, color, iconName) {
     const values = points.map((p) => p.v);
     let lo = Math.min(...values);
     let hi = Math.max(...values);
@@ -82,13 +98,41 @@ export function createGraph(container, model, onSeek) {
     const y = (v) => top + height - 2 - ((v - lo) / (hi - lo)) * (height - 4);
     const path = stepPath(points, y);
     const mid = top + height / 2;
-    g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
-    g.append(s("text", { x: 14, y: mid + 4, class: "g-label" }, label));
+    if (iconName) g.append(icon(iconName, 6, mid, 12, color, null, "g-label-icon"));
+    else g.append(s("line", { x1: 0, x2: 8, y1: mid, y2: mid, stroke: color, class: "g-swatch" }));
+    g.append(s("text", { x: iconName ? 17 : 14, y: mid + 4, class: "g-label" }, label));
     if (path) g.append(s("path", { d: path, stroke: color, class: "g-line" }));
     const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
     g.append(readout);
     readouts.push({ el: readout, points, format });
+    return y;
   }
+
+  /**
+   * A grievance as a section of the character's line, drawn like a protest: an angry face where it
+   * fires, a band along the line while it is open, and the outcome where it ends: check = resolved,
+   * cross = refused / out of turns / dropped. No end mark while it is still open (or cut by a reload).
+   */
+  function grievance(g, gv, lane, y, lineY, top, color) {
+    const t0 = gv.t0 ?? 0;
+    const t1 = gv.t1 ?? model.maxT;
+    const OUTCOME = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" };
+    const what = `Grievance ${gv.name ?? "?"}`;
+    if (gv.t0 !== null) {
+      const id = `gv-${++clipSeq}`;
+      const clip = s("clipPath", { id });
+      clip.append(s("rect", { x: x(t0), y: top, width: Math.max(0, x(t1) - x(t0)), height: LANE_H }));
+      g.append(clip);
+      const d = y ? stepPath(lane.points, y) : `M${x(t0)},${top + LANE_H / 2}H${x(t1)}`;
+      g.append(s("path", { d, stroke: color, "clip-path": `url(#${id})`, class: "g-grievance-span" }));
+      g.append(icon("smileyAngry", x(t0), lineY(gv.i0), 14, color, `${what} fired`, "g-grievance", true));
+    }
+    if (gv.outcome) {
+      const ok = gv.outcome === "resolved";
+      g.append(icon(ok ? "checkCircle" : "xCircle", x(t1), lineY(gv.i1), 14, color, `${what}: ${OUTCOME[gv.outcome] ?? gv.outcome}`, "g-grievance", true));
+    }
+  }
+  let clipSeq = 0;
 
   function render() {
     width = container.clientWidth;
@@ -105,27 +149,42 @@ export function createGraph(container, model, onSeek) {
     let slot = 0;
     const nextColor = () => CHARACTER_COLORS[slot++] ?? NEUTRAL;
     for (const [name, points] of model.resources) {
-      band(g, top, RES_H, points, name, (v) => String(v), NEUTRAL);
+      band(g, top, RES_H, points, name, (v) => String(v), NEUTRAL, RESOURCE_ICONS[name]);
       top += RES_H;
     }
     if (model.resources.size && model.lanes.size) top += GAP;
     for (const [name, lane] of model.lanes) {
       g.append(s("line", { x1: x0, x2: x1, y1: top + LANE_H - 1.5, y2: top + LANE_H - 1.5, class: "g-lane-base" }));
       const color = nextColor();
-      if (lane.points.length) band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color);
-      else g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color) : null;
+      if (!y) g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      // Marks sit on the character's line at that moment (its influence level), not on the row.
+      const lineY = (idx) => {
+        const at = y && typeof idx === "number" ? lastAtOrBefore(lane.points, idx) : -1;
+        return at >= 0 ? y(lane.points[at].v) : top + LANE_H / 2;
+      };
       for (const mark of lane.marks) {
         const mx = x(mark.t);
-        const mid = top + LANE_H / 2;
-        let el;
-        if (mark.kind === "mended") el = s("circle", { cx: mx, cy: mid, r: 3.5, fill: color, class: "g-grievance" });
-        else if (mark.kind === "broke") el = s("circle", { cx: mx, cy: mid, r: 3.5, stroke: color, class: "g-grievance hollow" });
-        else {
-          const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
-          el = s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" });
-        }
-        if (mark.title) el.append(s("title", {}, mark.title));
-        g.append(el);
+        const mid = lineY(mark.idx);
+        const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
+        g.append(s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" }));
+      }
+      for (const gv of lane.grievances) grievance(g, gv, lane, y, lineY, top, color);
+      top += LANE_H;
+    }
+
+    // Protests: a fist where one starts, a thin line while it lasts, a dimmer fist where it ends.
+    if (model.protests.length) {
+      top += GAP;
+      const mid = top + LANE_H / 2;
+      g.append(icon("handFist", 6, mid, 12, "currentColor", null, "g-protest"));
+      g.append(s("text", { x: 17, y: mid + 4, class: "g-label" }, "protest"));
+      for (const p of model.protests) {
+        const why = p.cause ? ` over ${p.cause}` : "";
+        const end = p.t1 ?? model.maxT;
+        g.append(s("line", { x1: x(p.t0), x2: x(end), y1: mid, y2: mid, class: "g-protest-span" }));
+        if (p.t1 !== null && !p.cut) g.append(icon("handFist", x(p.t1), mid, 12, "currentColor", "protest ended", "g-protest ended", true));
+        g.append(icon("handFist", x(p.t0), mid, 13, "currentColor", `protest started${why}`, "g-protest", true));
       }
       top += LANE_H;
     }
@@ -142,9 +201,7 @@ export function createGraph(container, model, onSeek) {
       const mx = x(m.t);
       if (m.kind === "session") g.append(s("line", { x1: mx, x2: mx, y1: 0, y2: plotBottom, class: "g-session" }));
       else if (m.kind === "reload") {
-        const mark = s("text", { x: mx, y: top + 8, class: "g-reload", "text-anchor": "middle" }, "↺");
-        mark.append(s("title", {}, "loaded an older save"));
-        g.append(mark);
+        g.append(icon("floppyDisk", mx, top + 5, 12, "currentColor", "loaded an older save", "g-reload"));
       }
       else if (m.kind === "feedback") g.append(s("circle", { cx: mx, cy: top + 3, r: 3.5, class: "g-feedback" }));
       else if (m.kind === "error") g.append(s("line", { x1: mx, x2: mx, y1: top - 2, y2: top + 7, class: "g-error" }));
