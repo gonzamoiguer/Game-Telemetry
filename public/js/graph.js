@@ -28,7 +28,7 @@ function s(tag, attrs = {}, text) {
 /**
  * A Phosphor icon centred on (cx, cy), `size` px square, filled with `color`, with hover text.
  * `backdrop` puts a page-coloured disc behind it so the lane line doesn't show through the
- * icon's cut-outs (the tick / cross).
+ * icon's cut-outs (eyes, mouth, fingers).
  */
 function icon(name, cx, cy, size, color, title, cls, backdrop = false) {
   const g = s("g", { class: cls });
@@ -108,6 +108,32 @@ export function createGraph(container, model, onSeek) {
     return y;
   }
 
+  /**
+   * A grievance as a section of the character's line, drawn like a protest: an angry face where it
+   * fires, the line thickened while it is open, and a face for the outcome where it ends (happy =
+   * resolved, angry = refused / out of turns / dropped). No end face while it is still open.
+   */
+  function grievance(g, gv, lane, y, lineY, top, color) {
+    const t0 = gv.t0 ?? 0;
+    const t1 = gv.t1 ?? model.maxT;
+    const OUTCOME = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" };
+    const what = `Grievance ${gv.name ?? "?"}`;
+    if (gv.t0 !== null) {
+      const id = `gv-${++clipSeq}`;
+      const clip = s("clipPath", { id });
+      clip.append(s("rect", { x: x(t0), y: top, width: Math.max(0, x(t1) - x(t0)), height: LANE_H }));
+      g.append(clip);
+      const d = y ? stepPath(lane.points, y) : `M${x(t0)},${top + LANE_H / 2}H${x(t1)}`;
+      g.append(s("path", { d, stroke: color, "clip-path": `url(#${id})`, class: "g-grievance-span" }));
+      g.append(icon("smileyAngry", x(t0), lineY(gv.i0), 14, color, `${what} fired`, "g-grievance", true));
+    }
+    if (gv.outcome) {
+      const ok = gv.outcome === "resolved";
+      g.append(icon(ok ? "smiley" : "smileyAngry", x(t1), lineY(gv.i1), 14, color, `${what}: ${OUTCOME[gv.outcome] ?? gv.outcome}`, "g-grievance", true));
+    }
+  }
+  let clipSeq = 0;
+
   function render() {
     width = container.clientWidth;
     if (width === 0) return;
@@ -132,21 +158,18 @@ export function createGraph(container, model, onSeek) {
       const color = nextColor();
       const y = lane.points.length ? band(g, top, LANE_H, lane.points, name, (v) => `L${v}`, color) : null;
       if (!y) g.append(s("text", { x: 14, y: top + LANE_H / 2 + 4, class: "g-label" }, name));
+      // Marks sit on the character's line at that moment (its influence level), not on the row.
+      const lineY = (idx) => {
+        const at = y && typeof idx === "number" ? lastAtOrBefore(lane.points, idx) : -1;
+        return at >= 0 ? y(lane.points[at].v) : top + LANE_H / 2;
+      };
       for (const mark of lane.marks) {
         const mx = x(mark.t);
-        // Centred on the character's line at that moment (its influence level), not on the row.
-        const at = y && typeof mark.idx === "number" ? lastAtOrBefore(lane.points, mark.idx) : -1;
-        const mid = at >= 0 ? y(lane.points[at].v) : top + LANE_H / 2;
-        let el;
-        if (mark.kind === "mended" || mark.kind === "broke") {
-          el = icon(mark.kind === "mended" ? "checkCircle" : "xCircle", mx, mid, 14, color, null, "g-grievance", true);
-        } else {
-          const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
-          el = s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" });
-        }
-        if (mark.title) el.append(s("title", {}, mark.title));
-        g.append(el);
+        const mid = lineY(mark.idx);
+        const shape = mark.kind === "in" ? `${mx},${mid - 4} ${mx + 5},${mid} ${mx},${mid + 4}` : `${mx},${mid - 4} ${mx - 5},${mid} ${mx},${mid + 4}`;
+        g.append(s("polygon", { points: shape, fill: color, class: mark.kind === "in" ? "g-in" : "g-out" }));
       }
+      for (const gv of lane.grievances) grievance(g, gv, lane, y, lineY, top, color);
       top += LANE_H;
     }
 
@@ -160,7 +183,7 @@ export function createGraph(container, model, onSeek) {
         const why = p.cause ? ` over ${p.cause}` : "";
         const end = p.t1 ?? model.maxT;
         g.append(s("line", { x1: x(p.t0), x2: x(end), y1: mid, y2: mid, class: "g-protest-span" }));
-        if (p.t1 !== null) g.append(icon("handFist", x(p.t1), mid, 12, "currentColor", "protest ended", "g-protest ended", true));
+        if (p.t1 !== null && !p.cut) g.append(icon("handFist", x(p.t1), mid, 12, "currentColor", "protest ended", "g-protest ended", true));
         g.append(icon("handFist", x(p.t0), mid, 13, "currentColor", `protest started${why}`, "g-protest", true));
       }
       top += LANE_H;

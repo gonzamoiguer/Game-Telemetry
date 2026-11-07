@@ -144,6 +144,7 @@ input:focus { outline: none; border-color: var(--text); }
 .g-lane-base { stroke: var(--line); }
 .g-out { opacity: 0.5; }
 .g-icon-backdrop { fill: var(--bg); }
+.g-grievance-span { fill: none; stroke-width: 5; opacity: 0.35; }
 .g-protest { color: var(--amber); }
 .g-protest.ended { opacity: 0.55; }
 .g-protest-span { stroke: var(--amber); stroke-width: 1.5; opacity: 0.6; }

@@ -5,7 +5,7 @@ import { createGraph } from "./graph.js";
 import { iconSvg } from "./icons.js";
 
 const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "character_gave", "influence_level_up", "situation", "grievance"]);
-// Grievance phases that end one: the moment the relationship breaks or mends, one dot on the lane.
+// Grievance phases that end one. A grievance is a section of its character's line, fired → outcome.
 const GRIEVANCE_END = new Set(["resolved", "refused", "timeout", "dropped"]);
 const LIVE_MS = 10 * 60 * 1000;
 
@@ -26,13 +26,22 @@ function buildModel(data) {
   let lastTurn = null;
 
   const lane = (name) => {
-    if (!lanes.has(name)) lanes.set(name, { points: [], marks: [] });
+    if (!lanes.has(name)) lanes.set(name, { points: [], marks: [], grievances: [] });
     return lanes.get(name);
   };
 
   for (const e of events) {
     if (prevT !== null) {
-      if (e.t < prevT - 0.001) markers.push({ t: x, kind: "reload" });
+      if (e.t < prevT - 0.001) {
+        markers.push({ t: x, kind: "reload" });
+        // What was going on in the abandoned timeline stops here, without an outcome.
+        for (const l of lanes.values()) {
+          const open = l.grievances.at(-1);
+          if (open && open.t1 === null) Object.assign(open, { t1: x, i1: e.idx });
+        }
+        const protest = protests.at(-1);
+        if (protest && protest.t1 === null) Object.assign(protest, { t1: x, cut: true });
+      }
       else x += e.t - prevT;
     }
     prevT = e.t;
@@ -58,9 +67,18 @@ function buildModel(data) {
         if (!l.points.length) point(0);
       } else if (e.type === "character_left") l.marks.push({ t: x, idx: e.idx, kind: "out" });
       else if (e.type === "influence_level_up" && typeof d.level === "number") point(d.level);
-      else if (e.type === "grievance" && GRIEVANCE_END.has(d.phase)) {
-        const outcome = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" }[d.phase];
-        l.marks.push({ t: x, idx: e.idx, kind: d.phase === "resolved" ? "mended" : "broke", title: `Grievance ${d.grievance ?? "?"}: ${outcome}` });
+      else if (e.type === "grievance") {
+        // { t0, i0 } fired, { t1, i1, outcome } ended; null = before the data / still open.
+        const open = l.grievances.at(-1)?.t1 === null ? l.grievances.at(-1) : null;
+        if (d.phase === "fired") {
+          if (open) Object.assign(open, { t1: x, i1: e.idx }); // a reload can skip an outcome
+          l.grievances.push({ name: d.grievance, t0: x, i0: e.idx, t1: null, i1: null, outcome: null });
+        } else if (GRIEVANCE_END.has(d.phase)) {
+          const g = open && open.name === d.grievance ? open : null;
+          if (open && !g) Object.assign(open, { t1: x, i1: e.idx });
+          const target = g ?? (l.grievances.push({ name: d.grievance, t0: null, i0: null, t1: null, i1: null, outcome: null }), l.grievances.at(-1));
+          Object.assign(target, { t1: x, i1: e.idx, outcome: d.phase });
+        }
       }
     }
     if (e.type === "protest") {
