@@ -149,6 +149,9 @@ input:focus { outline: none; border-color: var(--text); }
 .g-protest { color: var(--amber); }
 .g-protest.ended { opacity: 0.55; }
 .g-protest-span { stroke: var(--amber); stroke-width: 1.5; opacity: 0.6; }
+.g-project { color: var(--text); }
+.g-project-span { stroke: var(--text-2); stroke-width: 1.5; opacity: 0.6; }
+.g-project-piece { fill: var(--text-2); }
 
 /* Inline icons in timeline rows (resources, protest). */
 .ico { display: inline-block; vertical-align: -2px; margin-right: 3px; }
@@ -156,6 +159,8 @@ input:focus { outline: none; border-color: var(--text); }
 .rv + .rv { margin-left: 8px; }
 .row.protest { border-left-color: var(--amber); }
 .row.protest .protest-ico { color: var(--amber); margin-right: 6px; }
+.row.project { border-left-color: var(--text-2); }
+.row.project .project-ico { margin-right: 6px; }
 .g-reload { color: var(--text-2); }
 .g-session { stroke: var(--line-strong); stroke-dasharray: 1 3; }
 .g-tick { stroke: var(--text-3); }
@@ -219,6 +224,7 @@ input:focus { outline: none; border-color: var(--text); }
 .timeline.hide-turns .cat-turns,
 .timeline.hide-situations .cat-situations,
 .timeline.hide-shop .cat-shop,
+.timeline.hide-projects .cat-projects,
 .timeline.hide-errors .cat-errors,
 .timeline.hide-idle .cat-idle,
 .timeline.hide-checkpoints .cat-checkpoints,

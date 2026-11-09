@@ -20,6 +20,10 @@ function buildModel(data) {
   const lanes = new Map();
   const markers = [];
   const protests = []; // { t0, t1 (null = still on), cause }
+  // Tower projects, one at a time, all on one row: { name, id, t0 (null = before the data), t1, opened,
+  // cut, pieces: [{ t, height, target, piece }] }. progress: height over time, for the readout.
+  const projects = [];
+  const projectProgress = [];
   let prevT = null;
   let x = 0;
   let turn = null;
@@ -42,6 +46,8 @@ function buildModel(data) {
         }
         const protest = protests.at(-1);
         if (protest && protest.t1 === null) Object.assign(protest, { t1: x, cut: true });
+        const project = projects.at(-1);
+        if (project && project.t1 === null) Object.assign(project, { t1: x, cut: true });
       }
       else x += e.t - prevT;
     }
@@ -88,6 +94,18 @@ function buildModel(data) {
         }
       }
     }
+    if (e.type === "project") {
+      let p = projects.at(-1);
+      if (p && p.t1 !== null) p = null;
+      if (p && p.id !== d.id) { Object.assign(p, { t1: x, cut: true }); p = null; }
+      if (d.phase === "started" || !p) {
+        p = { name: d.project, id: d.id, t0: d.phase === "started" ? x : null, start: x, t1: null, opened: false, cut: false, pieces: [] };
+        projects.push(p);
+      }
+      if (d.phase === "piece") p.pieces.push({ t: x, height: d.height, target: d.target, piece: d.piece });
+      if (d.phase === "opened") Object.assign(p, { t1: x, opened: true });
+      if (typeof d.height === "number") projectProgress.push({ t: x, v: d.height, idx: e.idx, target: d.target, name: d.project, opened: d.phase === "opened" });
+    }
     if (e.type === "protest") {
       const open = protests.at(-1);
       if (d.active) {
@@ -99,7 +117,7 @@ function buildModel(data) {
     if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  return { events, resources, lanes, markers, protests, maxT: Math.max(1, x), lastTurn };
+  return { events, resources, lanes, markers, protests, projects, projectProgress, maxT: Math.max(1, x), lastTurn };
 }
 
 /** Text for a session divider. */
