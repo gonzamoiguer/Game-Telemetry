@@ -202,6 +202,31 @@ export function createGraph(container, model, onSeek) {
       }
       top += LANE_H;
     }
+
+    // Tower projects, all on one row (one at a time): a building where one starts, a line while it is
+    // under construction, a dot per piece, and a check where it opens. Readout: floors / target.
+    if (model.projects.length) {
+      top += GAP;
+      const mid = top + LANE_H / 2;
+      g.append(icon("building", 6, mid, 12, "currentColor", null, "g-project"));
+      g.append(s("text", { x: 17, y: mid + 4, class: "g-label" }, "projects"));
+      for (const p of model.projects) {
+        const t0 = p.t0 ?? p.start;
+        const end = p.t1 ?? model.maxT;
+        g.append(s("line", { x1: x(t0), x2: x(end), y1: mid, y2: mid, class: "g-project-span" }));
+        for (const piece of p.pieces) {
+          const dot = s("circle", { cx: x(piece.t), cy: mid, r: 2.2, class: "g-project-piece" });
+          dot.append(s("title", {}, `${p.name}: ${piece.piece ?? "piece"} · ${piece.height}/${piece.target} floors`));
+          g.append(dot);
+        }
+        if (p.opened) g.append(icon("checkCircle", x(end), mid, 13, "currentColor", `${p.name} opened`, "g-project", true));
+        if (p.t0 !== null) g.append(icon("building", x(p.t0), mid, 13, "currentColor", `${p.name} started`, "g-project", true));
+      }
+      const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
+      g.append(readout);
+      readouts.push({ el: readout, points: model.projectProgress, format: (v, p) => (p.opened ? "open" : `${v}/${p.target ?? "?"}`) });
+      top += LANE_H;
+    }
     const plotBottom = top;
 
     // Axis: time ticks plus markers for sessions, save reloads, feedback, errors and crashes.

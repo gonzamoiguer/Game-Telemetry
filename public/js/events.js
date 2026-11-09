@@ -3,7 +3,7 @@
 import { dur, h, screenshot } from "./dom.js";
 import { iconSvg, RESOURCE_ICONS } from "./icons.js";
 
-export const CATEGORIES = ["cards", "characters", "turns", "situations", "shop", "errors", "idle", "checkpoints", "feedback"];
+export const CATEGORIES = ["cards", "characters", "turns", "situations", "projects", "shop", "errors", "idle", "checkpoints", "feedback"];
 
 const b = (text) => h("b", null, text);
 
@@ -57,6 +57,29 @@ function grievance(d) {
   parts.push(rel);
   const cls = d.phase === "resolved" ? "good" : d.phase === "refused" || d.phase === "timeout" ? "bad" : d.phase === "fired" ? "breakpoint" : "";
   return { cat: "situations", cls, body: withRes(d, parts) };
+}
+
+/** Tower projects: start and opening stand out; pieces and the closing hand-over are quiet rows. */
+function project(d) {
+  const floors = typeof d.height === "number" ? ` · ${d.height}/${d.target ?? "?"} floors` : "";
+  const name = b(d.project ?? "?");
+  switch (d.phase) {
+    case "started":
+      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("building", 14, "ico project-ico"), b("Project started"), " · ", d.project ?? "?",
+        d.character ? ` (${d.character})` : "", typeof d.target === "number" ? ` · goal ${d.target} floors` : ""]) };
+    case "piece":
+      return { cat: "projects", cls: "dim", body: withRes(d, ["Piece ", d.piece ?? "?", " on ", name, floors,
+        typeof d.pieces === "number" ? ` · ${d.pieces} piece${d.pieces === 1 ? "" : "s"}` : "", typeof d.multiplier === "number" ? ` · cost ×${d.multiplier}` : ""]) };
+    case "goal_met":
+      return { cat: "projects", body: [name, " reached its goal", floors, d.character ? ` · ${d.character} brings the closing piece` : ""] };
+    case "closing_given":
+      return { cat: "projects", cls: "dim", body: ["Closing piece of ", name, " in hand"] };
+    case "opened":
+      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("checkCircle", 14, "ico project-ico"), b("Project opened"), " · ", d.project ?? "?",
+        typeof d.pieces === "number" ? ` · ${d.pieces} piece${d.pieces === 1 ? "" : "s"}` : "", floors, hasEntries(d.opening) ? [" · opening ", resNodes(d.opening)] : ""]) };
+    default:
+      return { cat: "projects", body: ["Project ", name, ` · ${d.phase ?? "?"}`] };
+  }
 }
 
 function shopBuy(d) {
@@ -117,6 +140,7 @@ const renderers = {
         typeof d.hand === "number" ? ` · hand ${d.hand}${typeof d.hand_size === "number" ? `/${d.hand_size}` : ""}` : ""]),
   }),
   shop_buy: shopBuy,
+  project,
   checkpoint: (d, e) => ({
     cat: "checkpoints",
     cls: "checkpoint",
