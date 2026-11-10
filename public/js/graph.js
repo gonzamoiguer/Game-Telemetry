@@ -255,9 +255,10 @@ export function createGraph(container, model, onSeek) {
     }
     for (const m of model.markers) {
       const mx = x(m.t);
-      if (m.kind === "session") g.append(s("line", { x1: mx, x2: mx, y1: 0, y2: plotBottom, class: "g-session" }));
-      else if (m.kind === "reload") {
-        g.append(icon("floppyDisk", mx, top + 5, 12, "currentColor", "loaded an older save", "g-reload"));
+      if (m.kind === "session") {
+        // The player left and came back (the game resumed from its save): every line carries on.
+        g.append(s("line", { x1: mx, x2: mx, y1: 0, y2: plotBottom, class: "g-session" }));
+        g.append(icon("floppyDisk", mx, top + 5, 12, "currentColor", m.title ?? "left and returned", "g-reload"));
       }
       else if (m.kind === "feedback") g.append(s("circle", { cx: mx, cy: top + 3, r: 3.5, class: "g-feedback" }));
       else if (m.kind === "error") g.append(s("line", { x1: mx, x2: mx, y1: top - 2, y2: top + 7, class: "g-error" }));
