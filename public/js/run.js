@@ -8,11 +8,18 @@ const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "charac
 // Grievance phases that end one. A grievance is a section of its character's line, fired → outcome.
 const GRIEVANCE_END = new Set(["resolved", "refused", "timeout", "dropped"]);
 const LIVE_MS = 10 * 60 * 1000;
+// Bookkeeping, not play: a save that is only "older" than these lost nothing.
+const NOT_PLAY = new Set(["run_start", "session_start", "session_end", "idle", "checkpoint", "error", "error_repeat", "feedback"]);
 
 /**
  * Derives turns, resource series, character lanes and markers on the REPLAY clock `x`: the play time
- * as the player lived it, which only moves forward. The game's own clock `t` belongs to the save and
- * goes back when an older save is loaded; there the replay just carries on, with a save (floppy disk) marker.
+ * as the player lived it, which only moves forward. The game's own clock `t` belongs to the save.
+ *
+ * Quitting saves, so Continue normally resumes at the very moment the player left: the next session
+ * starts a hair "earlier" than the last event (the clock ticked on after the save) and that is NOT a
+ * load of an older save: everything simply continues. Only when play that happened after the save is
+ * lost (a crash with an older autosave, a debug load) does the replay mark it with a floppy disk and
+ * undo what started after the save (see loadSave).
  */
 function buildModel(data) {
   const events = data.events.map((e, idx) => ({ ...e, idx, data: parseJson(e.data) }));
@@ -32,6 +39,8 @@ function buildModel(data) {
   const projectProgress = []; // how many are under construction, for the readout
   const projectLabel = projectLabels(events);
   let prevT = null;
+  let lastPlayT = -Infinity; // game clock of the latest gameplay event in the current timeline
+  const lost = new Map(); // session id → seconds of play a load undid
   let x = 0;
   let turn = null;
   let lastTurn = null;
@@ -75,15 +84,20 @@ function buildModel(data) {
   for (const e of events) {
     if (prevT !== null) {
       if (e.t < prevT - 0.001) {
-        // An older save was loaded: the game is back at the moment it was saved (its clock `save`).
+        // The game is back at the moment it was saved (its clock `save`). Only a load if play was lost.
         const save = typeof e.data?.loaded_t === "number" ? e.data.loaded_t : e.t;
-        markers.push({ t: x, kind: "reload" });
-        loadSave(save, e.idx);
+        if (lastPlayT > save + 0.05) {
+          markers.push({ t: x, kind: "reload" });
+          lost.set(e.s, lastPlayT - save);
+          loadSave(save, e.idx);
+          lastPlayT = save;
+        }
       }
       else x += e.t - prevT;
     }
     prevT = e.t;
     e.x = x;
+    if (!NOT_PLAY.has(e.type)) lastPlayT = Math.max(lastPlayT, e.t);
 
     const d = e.data;
     if ((e.type === "turn" || e.type === "card_played") && typeof d.turn === "number") turn = d.turn;
@@ -159,7 +173,7 @@ function buildModel(data) {
   }
 
   const projectLanes = assignProjectLanes(projects);
-  return { events, resources, lanes, markers, protests, projects, projectLanes, projectProgress, maxT: Math.max(1, x), lastTurn };
+  return { events, resources, lanes, markers, protests, projects, projectLanes, projectProgress, lost, maxT: Math.max(1, x), lastTurn };
 }
 
 /**
@@ -200,7 +214,8 @@ function assignProjectLanes(projects) {
 }
 
 /** Text for a session divider. */
-function sessionTitle(session, number, first, prevLastT) {
+/** `lost`: seconds of play the session's load undid (it loaded a save older than where play got to). */
+function sessionTitle(session, number, first, lost) {
   const start = first?.type === "session_start" ? first.data : {};
   const parts = [`Session ${number}`];
   if (start.resumed) parts.push(typeof start.gap_s === "number" ? `resumed ${span(start.gap_s)} later` : "resumed");
@@ -209,11 +224,7 @@ function sessionTitle(session, number, first, prevLastT) {
   parts.push(date(session.started_at), `build ${session.build}`);
   if (session.resolution) parts.push(session.resolution.replace("x", "×"));
   if (session.env !== "release") parts.push(session.env);
-  let rewind = null;
-  const loaded = typeof start.loaded_t === "number" ? start.loaded_t : first?.t;
-  if (prevLastT !== null && typeof loaded === "number" && loaded < prevLastT - 1) {
-    rewind = `reloaded save, rewound ${dur(prevLastT - loaded)}`;
-  }
+  const rewind = lost ? `loaded an older save · ${dur(lost)} of play undone` : null;
   return { text: parts.join(" · "), rewind };
 }
 
@@ -242,13 +253,12 @@ function buildTimeline(model, data) {
     frag.append(row.el);
   };
 
-  let prevLastT = null; // the save's clock, for "rewound …" in the divider
   let lastX = 0;
   let lastIdx = 0;
   data.sessions.forEach((session, i) => {
     const events = bySession.get(session.id) ?? [];
     const first = events[0];
-    const title = sessionTitle(session, i + 1, first, prevLastT);
+    const title = sessionTitle(session, i + 1, first, model.lost.get(session.id));
     if (first && i > 0) model.markers.push({ t: first.x, kind: "session" });
     const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
       title.rewind ? h("span", { class: "rewind" }, iconSvg("floppyDisk", 12), title.rewind) : null);
@@ -274,7 +284,6 @@ function buildTimeline(model, data) {
 
     const last = events[events.length - 1];
     if (last) {
-      prevLastT = last.t;
       lastX = last.x;
       lastIdx = last.idx;
     }
