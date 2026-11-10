@@ -19,16 +19,18 @@ function buildModel(data) {
   const resources = new Map();
   const lanes = new Map();
   const markers = [];
-  const protests = []; // { t0, t1 (null = still on), cause }
+  // Sections with a duration (protests, grievances, projects) also keep s0 / s1: the GAME clock when
+  // they started / ended (-Infinity = before the data). That is what a loaded save is compared with.
+  const protests = []; // { t0, t1 (null = still on), cause, s0, s1 }
   // Tower projects, keyed by instance id. Several can be under construction at once, and a merge ends
   // the absorbed ones in the survivor. One span per stretch of a project:
   // { name, label, id, t0 (null = started before this span), start, t1 (null = still building), opened,
-  //   cut (a reload abandoned it), mergedInto (span), pieces: [{ t, height, target, piece }], lane }.
+  //   undone (a load went back to before it started), mergedInto (span), pieces: [{ t, height, target, piece }],
+  //   lane, s0, s1 }.
   const projects = [];
   const projectById = new Map(); // id → its latest span
   const projectProgress = []; // how many are under construction, for the readout
   const projectLabel = projectLabels(events);
-  let lastReload = 0; // replay time of the latest save reload
   let prevT = null;
   let x = 0;
   let turn = null;
@@ -40,19 +42,43 @@ function buildModel(data) {
     return lanes.get(name);
   };
 
+  /**
+   * A save is a snapshot of one moment; loading it resumes the game from there. So, at the load (replay
+   * time x), for each kind of section: one open at the save moment simply continues; one that started
+   * after the save never happened in the loaded game, so it stops here (no outcome); one that ended
+   * after the save is open again, so it continues from here (its end stays where the player saw it).
+   */
+  function loadSave(save, idx) {
+    const EPS = 0.001;
+    const startedAfter = (sp) => sp.s0 > save + EPS;
+    const openAtSave = (sp) => sp.s0 <= save + EPS && sp.s1 !== null && sp.s1 > save + EPS;
+
+    for (const sp of [...protests, ...projects, ...[...lanes.values()].flatMap((l) => l.grievances)])
+      if (sp.t1 === null && startedAfter(sp)) Object.assign(sp, { t1: x, i1: idx, undone: true, cut: true });
+
+    // Reopen: the latest span of each thing only.
+    const protest = protests.at(-1);
+    if (protest && openAtSave(protest) && !protests.some((p) => p.t1 === null))
+      protests.push({ t0: null, start: x, t1: null, cause: protest.cause, s0: save, s1: null });
+    for (const l of lanes.values()) {
+      const g = l.grievances.at(-1);
+      if (g && openAtSave(g)) l.grievances.push({ name: g.name, t0: null, i0: idx, start: x, t1: null, i1: null, outcome: null, s0: save, s1: null });
+    }
+    for (const [id, p] of projectById) {
+      if (!openAtSave(p)) continue;
+      const again = { ...p, t0: null, start: x, t1: null, opened: false, undone: false, cut: false, mergedInto: null, pieces: [], s0: save, s1: null };
+      projects.push(again);
+      projectById.set(id, again);
+    }
+  }
+
   for (const e of events) {
     if (prevT !== null) {
       if (e.t < prevT - 0.001) {
+        // An older save was loaded: the game is back at the moment it was saved (its clock `save`).
+        const save = typeof e.data?.loaded_t === "number" ? e.data.loaded_t : e.t;
         markers.push({ t: x, kind: "reload" });
-        lastReload = x;
-        // What was going on in the abandoned timeline stops here, without an outcome.
-        for (const l of lanes.values()) {
-          const open = l.grievances.at(-1);
-          if (open && open.t1 === null) Object.assign(open, { t1: x, i1: e.idx });
-        }
-        const protest = protests.at(-1);
-        if (protest && protest.t1 === null) Object.assign(protest, { t1: x, cut: true });
-        for (const p of projects) if (p.t1 === null) Object.assign(p, { t1: x, cut: true });
+        loadSave(save, e.idx);
       }
       else x += e.t - prevT;
     }
@@ -89,13 +115,13 @@ function buildModel(data) {
         // { t0, i0 } fired, { t1, i1, outcome } ended; null = before the data / still open.
         const open = l.grievances.at(-1)?.t1 === null ? l.grievances.at(-1) : null;
         if (d.phase === "fired") {
-          if (open) Object.assign(open, { t1: x, i1: e.idx }); // a reload can skip an outcome
-          l.grievances.push({ name: d.grievance, t0: x, i0: e.idx, t1: null, i1: null, outcome: null });
+          if (open) Object.assign(open, { t1: x, i1: e.idx, s1: e.t }); // inconsistent data: never two at once
+          l.grievances.push({ name: d.grievance, t0: x, i0: e.idx, t1: null, i1: null, outcome: null, s0: e.t, s1: null });
         } else if (GRIEVANCE_END.has(d.phase)) {
           const g = open && open.name === d.grievance ? open : null;
-          if (open && !g) Object.assign(open, { t1: x, i1: e.idx });
-          const target = g ?? (l.grievances.push({ name: d.grievance, t0: null, i0: null, t1: null, i1: null, outcome: null }), l.grievances.at(-1));
-          Object.assign(target, { t1: x, i1: e.idx, outcome: d.phase });
+          if (open && !g) Object.assign(open, { t1: x, i1: e.idx, s1: e.t });
+          const target = g ?? (l.grievances.push({ name: d.grievance, t0: null, i0: null, t1: null, i1: null, outcome: null, s0: -Infinity, s1: null }), l.grievances.at(-1));
+          Object.assign(target, { t1: x, i1: e.idx, outcome: d.phase, s1: e.t });
         }
       }
     }
@@ -103,10 +129,9 @@ function buildModel(data) {
       d._label = projectLabel.get(d.id) ?? d.project; // for the timeline row
       let p = projectById.get(d.id);
       if (!p || p.t1 !== null) {
-        // New, or seen again after a reload cut it: a fresh span. A continuation was in the loaded save,
-        // so it resumes right at the reload.
-        const start = p?.cut ? lastReload : x;
-        p = { name: d.project, label: d._label, id: d.id, t0: null, start, t1: null, opened: false, cut: false, mergedInto: null, pieces: [] };
+        // New (or first seen mid-way: it started before the data, s0 unknown).
+        p = { name: d.project, label: d._label, id: d.id, t0: null, start: x, t1: null, opened: false, undone: false, mergedInto: null, pieces: [],
+          s0: d.phase === "started" ? e.t : -Infinity, s1: null };
         projects.push(p);
         projectById.set(d.id, p);
       }
@@ -116,18 +141,18 @@ function buildModel(data) {
         d._absorbed = d.absorbed.map((id) => projectLabel.get(id) ?? "another project");
         for (const id of d.absorbed) {
           const a = projectById.get(id);
-          if (a && a.t1 === null) Object.assign(a, { t1: x, mergedInto: p });
+          if (a && a.t1 === null) Object.assign(a, { t1: x, mergedInto: p, s1: e.t });
         }
       }
-      if (d.phase === "opened") Object.assign(p, { t1: x, opened: true });
+      if (d.phase === "opened") Object.assign(p, { t1: x, opened: true, s1: e.t });
       projectProgress.push({ t: x, v: projects.filter((q) => q.t1 === null).length, idx: e.idx });
     }
     if (e.type === "protest") {
       const open = protests.at(-1);
       if (d.active) {
-        if (open && open.t1 === null) open.t1 = x; // a reload can skip an end
-        protests.push({ t0: x, t1: null, cause: typeof d.cause === "string" ? d.cause : null });
-      } else if (open && open.t1 === null) open.t1 = x;
+        if (open && open.t1 === null) Object.assign(open, { t1: x, s1: e.t }); // inconsistent data: never two at once
+        protests.push({ t0: x, start: x, t1: null, cause: typeof d.cause === "string" ? d.cause : null, s0: e.t, s1: null });
+      } else if (open && open.t1 === null) Object.assign(open, { t1: x, s1: e.t });
     }
     if (e.type === "feedback") markers.push({ t: x, kind: "feedback" });
     if (e.type === "error") markers.push({ t: x, kind: "error" });

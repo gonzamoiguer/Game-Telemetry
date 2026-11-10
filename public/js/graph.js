@@ -116,18 +116,19 @@ export function createGraph(container, model, onSeek) {
    * cross = refused / out of turns / dropped. No end mark while it is still open (or cut by a reload).
    */
   function grievance(g, gv, lane, y, lineY, top, color) {
-    const t0 = gv.t0 ?? 0;
+    // start: where a grievance open in a loaded save carries on (no angry face: it fired earlier).
+    const t0 = gv.t0 ?? gv.start ?? null;
     const t1 = gv.t1 ?? model.maxT;
     const OUTCOME = { resolved: "resolved", refused: "refused", timeout: "ran out of turns", dropped: "dropped" };
     const what = `Grievance ${gv.name ?? "?"}`;
-    if (gv.t0 !== null) {
+    if (t0 !== null) {
       const id = `gv-${++clipSeq}`;
       const clip = s("clipPath", { id });
       clip.append(s("rect", { x: x(t0), y: top, width: Math.max(0, x(t1) - x(t0)), height: LANE_H }));
       g.append(clip);
       const d = y ? stepPath(lane.points, y) : `M${x(t0)},${top + LANE_H / 2}H${x(t1)}`;
       g.append(s("path", { d, stroke: color, "clip-path": `url(#${id})`, class: "g-grievance-span" }));
-      g.append(icon("smileyAngry", x(t0), lineY(gv.i0), 14, color, `${what} fired`, "g-grievance", true));
+      if (gv.t0 !== null) g.append(icon("smileyAngry", x(t0), lineY(gv.i0), 14, color, `${what} fired`, "g-grievance", true));
     }
     if (gv.outcome) {
       const ok = gv.outcome === "resolved";
@@ -197,9 +198,10 @@ export function createGraph(container, model, onSeek) {
       for (const p of model.protests) {
         const why = p.cause ? ` over ${p.cause}` : "";
         const end = p.t1 ?? model.maxT;
-        g.append(s("line", { x1: x(p.t0), x2: x(end), y1: mid, y2: mid, class: "g-protest-span" }));
+        // t0 null: a protest open in a loaded save, carrying on from the load (it started earlier).
+        g.append(s("line", { x1: x(p.t0 ?? p.start), x2: x(end), y1: mid, y2: mid, class: "g-protest-span" }));
         if (p.t1 !== null && !p.cut) g.append(icon("handFist", x(p.t1), mid, 12, "currentColor", "protest ended", "g-protest ended", true));
-        g.append(icon("handFist", x(p.t0), mid, 13, "currentColor", `protest started${why}`, "g-protest", true));
+        if (p.t0 !== null) g.append(icon("handFist", x(p.t0), mid, 13, "currentColor", `protest started${why}`, "g-protest", true));
       }
       top += LANE_H;
     }
