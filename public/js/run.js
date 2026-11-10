@@ -8,22 +8,57 @@ const CHARACTER_TYPES = new Set(["character_appeared", "character_left", "charac
 // Grievance phases that end one. A grievance is a section of its character's line, fired → outcome.
 const GRIEVANCE_END = new Set(["resolved", "refused", "timeout", "dropped"]);
 const LIVE_MS = 10 * 60 * 1000;
+// Bookkeeping, not play: a session that resumes from a save only "older" than these lost nothing.
+const NOT_PLAY = new Set(["run_start", "session_start", "session_end", "idle", "checkpoint", "error", "error_repeat", "feedback"]);
+
+/**
+ * Marks the play a session never kept: Continue resumes from the last save, and quitting saves, so
+ * normally nothing is lost. Only after a crash (or a debug load) can the save be older than where the
+ * player got to: the gameplay events after the save's moment (`session_start.loaded_t`) are then not
+ * in the game anymore. They get `lost = true`; the replay leaves them out (the next session continues
+ * straight from the save) and the timeline shows them in red. Returns session id → events it lost.
+ */
+function markLostPlay(events) {
+  const lostBy = new Map();
+  let since = 0; // index where the current game timeline starts
+  let prevT = null;
+  for (let i = 0; i < events.length; i++) {
+    const e = events[i];
+    if (prevT !== null && e.t < prevT - 0.001) {
+      const save = typeof e.data?.loaded_t === "number" ? e.data.loaded_t : e.t;
+      const after = events.slice(since, i).filter((p) => p.t > save + 0.05 && p.type !== "session_end");
+      if (after.some((p) => !NOT_PLAY.has(p.type))) {
+        for (const p of after) p.lost = true;
+        lostBy.set(e.s, after.length);
+      }
+      since = i;
+    }
+    prevT = e.t;
+  }
+  return lostBy;
+}
 
 /**
  * Derives turns, resource series, character lanes and markers on the REPLAY clock `x`: the play time
- * as the player lived it, which only moves forward. The game's own clock `t` belongs to the save and
- * goes back when an older save is loaded; there the replay just carries on, with a save (floppy disk) marker.
+ * as the player lived it, which only moves forward. A later session resumes from the save the
+ * previous one left, so everything continues across it; the timeline marks it with a floppy disk.
+ * Play that a crash lost (see markLostPlay) is left out.
  */
 function buildModel(data) {
   const events = data.events.map((e, idx) => ({ ...e, idx, data: parseJson(e.data) }));
+  const lostBy = markLostPlay(events);
   const resources = new Map();
   const lanes = new Map();
   const markers = [];
   const protests = []; // { t0, t1 (null = still on), cause }
-  // Tower projects, one at a time, all on one row: { name, id, t0 (null = before the data), t1, opened,
-  // cut, pieces: [{ t, height, target, piece }] }. progress: height over time, for the readout.
+  // Tower projects, keyed by instance id. Several can be under construction at once, and a merge ends
+  // the absorbed ones in the survivor. One span per stretch of a project:
+  // { name, label, id, t0 (null = started before this span), start, t1 (null = still building), opened,
+  //   mergedInto (span), pieces: [{ t, height, target, piece }], lane }.
   const projects = [];
-  const projectProgress = [];
+  const projectById = new Map(); // id → its latest span
+  const projectProgress = []; // how many are under construction, for the readout
+  const projectLabel = projectLabels(events);
   let prevT = null;
   let x = 0;
   let turn = null;
@@ -36,20 +71,16 @@ function buildModel(data) {
   };
 
   for (const e of events) {
+    if (e.lost) {
+      e.x = x; // shown in the timeline (in red) at the moment it was lost, nothing else
+      e.turn = turn;
+      continue;
+    }
     if (prevT !== null) {
-      if (e.t < prevT - 0.001) {
-        markers.push({ t: x, kind: "reload" });
-        // What was going on in the abandoned timeline stops here, without an outcome.
-        for (const l of lanes.values()) {
-          const open = l.grievances.at(-1);
-          if (open && open.t1 === null) Object.assign(open, { t1: x, i1: e.idx });
-        }
-        const protest = protests.at(-1);
-        if (protest && protest.t1 === null) Object.assign(protest, { t1: x, cut: true });
-        const project = projects.at(-1);
-        if (project && project.t1 === null) Object.assign(project, { t1: x, cut: true });
-      }
-      else x += e.t - prevT;
+      // The game clock goes back a hair when a session resumes from the save made on quit (the clock
+      // ticked on after it): the replay simply continues. Lost events never advance it.
+      if (e.t > prevT) x += e.t - prevT;
+
     }
     prevT = e.t;
     e.x = x;
@@ -84,7 +115,7 @@ function buildModel(data) {
         // { t0, i0 } fired, { t1, i1, outcome } ended; null = before the data / still open.
         const open = l.grievances.at(-1)?.t1 === null ? l.grievances.at(-1) : null;
         if (d.phase === "fired") {
-          if (open) Object.assign(open, { t1: x, i1: e.idx }); // a reload can skip an outcome
+          if (open) Object.assign(open, { t1: x, i1: e.idx }); // never two at once: close one left without an outcome
           l.grievances.push({ name: d.grievance, t0: x, i0: e.idx, t1: null, i1: null, outcome: null });
         } else if (GRIEVANCE_END.has(d.phase)) {
           const g = open && open.name === d.grievance ? open : null;
@@ -94,22 +125,31 @@ function buildModel(data) {
         }
       }
     }
-    if (e.type === "project") {
-      let p = projects.at(-1);
-      if (p && p.t1 !== null) p = null;
-      if (p && p.id !== d.id) { Object.assign(p, { t1: x, cut: true }); p = null; }
-      if (d.phase === "started" || !p) {
-        p = { name: d.project, id: d.id, t0: d.phase === "started" ? x : null, start: x, t1: null, opened: false, cut: false, pieces: [] };
+    if (e.type === "project" && typeof d.id === "string") {
+      d._label = projectLabel.get(d.id) ?? d.project; // for the timeline row
+      let p = projectById.get(d.id);
+      if (!p || p.t1 !== null) {
+        // New (or first seen mid-way: it started before the data).
+        p = { name: d.project, label: d._label, id: d.id, t0: null, start: x, t1: null, opened: false, mergedInto: null, pieces: [] };
         projects.push(p);
+        projectById.set(d.id, p);
       }
+      if (d.phase === "started" && p.t0 === null && !p.pieces.length) p.t0 = x;
       if (d.phase === "piece") p.pieces.push({ t: x, height: d.height, target: d.target, piece: d.piece });
+      if (d.phase === "merged" && Array.isArray(d.absorbed)) {
+        d._absorbed = d.absorbed.map((id) => projectLabel.get(id) ?? "another project");
+        for (const id of d.absorbed) {
+          const a = projectById.get(id);
+          if (a && a.t1 === null) Object.assign(a, { t1: x, mergedInto: p });
+        }
+      }
       if (d.phase === "opened") Object.assign(p, { t1: x, opened: true });
-      if (typeof d.height === "number") projectProgress.push({ t: x, v: d.height, idx: e.idx, target: d.target, name: d.project, opened: d.phase === "opened" });
+      projectProgress.push({ t: x, v: projects.filter((q) => q.t1 === null).length, idx: e.idx });
     }
     if (e.type === "protest") {
       const open = protests.at(-1);
       if (d.active) {
-        if (open && open.t1 === null) open.t1 = x; // a reload can skip an end
+        if (open && open.t1 === null) open.t1 = x; // never two at once: close one left without an end
         protests.push({ t0: x, t1: null, cause: typeof d.cause === "string" ? d.cause : null });
       } else if (open && open.t1 === null) open.t1 = x;
     }
@@ -117,11 +157,49 @@ function buildModel(data) {
     if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  return { events, resources, lanes, markers, protests, projects, projectProgress, maxT: Math.max(1, x), lastTurn };
+  const projectLanes = assignProjectLanes(projects);
+  return { events, resources, lanes, markers, protests, projects, projectLanes, projectProgress, lostBy, maxT: Math.max(1, x), lastTurn };
+}
+
+/**
+ * "Torre_Nely", or "Torre_Nely #2" when that kind of project was built more than once in the run, so
+ * simultaneous (and merging) towers of the same kind can be told apart. Numbered in order of appearance.
+ */
+function projectLabels(events) {
+  const idsByName = new Map();
+  for (const e of events) {
+    if (e.type !== "project" || typeof e.data?.id !== "string") continue;
+    const ids = idsByName.get(e.data.project) ?? [];
+    for (const id of [e.data.id, ...(Array.isArray(e.data.absorbed) ? e.data.absorbed : [])]) if (!ids.includes(id)) ids.push(id);
+    idsByName.set(e.data.project, ids);
+  }
+  const labels = new Map();
+  for (const [name, ids] of idsByName) ids.forEach((id, i) => labels.set(id, ids.length > 1 ? `${name} #${i + 1}` : name));
+  return labels;
+}
+
+/**
+ * Gives each project span a lane: the first lane free when it starts (a finished or merged project
+ * frees its lane, so later ones reuse it); simultaneous ones stack. Returns how many lanes are used.
+ */
+function assignProjectLanes(projects) {
+  const laneEnd = []; // per lane: when its last project ended (Infinity = still building)
+  const lastLane = new Map(); // id → lane of its previous span
+  for (const p of projects) {
+    const end = p.t1 ?? Infinity;
+    const prev = lastLane.get(p.id);
+    let lane = prev !== undefined && laneEnd[prev] <= p.start ? prev : laneEnd.findIndex((t) => t < p.start);
+    if (lane < 0) lane = laneEnd.length;
+    laneEnd[lane] = end;
+    p.lane = lane;
+    lastLane.set(p.id, lane);
+  }
+  return laneEnd.length;
 }
 
 /** Text for a session divider. */
-function sessionTitle(session, number, first, prevLastT) {
+/** `lost`: events of the previous session that a crash lost (this one resumed from an older save). */
+function sessionTitle(session, number, first, lost) {
   const start = first?.type === "session_start" ? first.data : {};
   const parts = [`Session ${number}`];
   if (start.resumed) parts.push(typeof start.gap_s === "number" ? `resumed ${span(start.gap_s)} later` : "resumed");
@@ -130,11 +208,7 @@ function sessionTitle(session, number, first, prevLastT) {
   parts.push(date(session.started_at), `build ${session.build}`);
   if (session.resolution) parts.push(session.resolution.replace("x", "×"));
   if (session.env !== "release") parts.push(session.env);
-  let rewind = null;
-  const loaded = typeof start.loaded_t === "number" ? start.loaded_t : first?.t;
-  if (prevLastT !== null && typeof loaded === "number" && loaded < prevLastT - 1) {
-    rewind = `reloaded save, rewound ${dur(prevLastT - loaded)}`;
-  }
+  const rewind = lost ? `crash recovery · resumed from the last save · ${lost} event${lost === 1 ? "" : "s"} after it lost (red)` : null;
   return { text: parts.join(" · "), rewind };
 }
 
@@ -163,15 +237,18 @@ function buildTimeline(model, data) {
     frag.append(row.el);
   };
 
-  let prevLastT = null; // the save's clock, for "rewound …" in the divider
   let lastX = 0;
   let lastIdx = 0;
   data.sessions.forEach((session, i) => {
     const events = bySession.get(session.id) ?? [];
     const first = events[0];
-    const title = sessionTitle(session, i + 1, first, prevLastT);
-    if (first && i > 0) model.markers.push({ t: first.x, kind: "session" });
-    const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, title.text),
+    const title = sessionTitle(session, i + 1, first, model.lostBy.get(session.id));
+    if (first && i > 0) {
+      // The player left and came back: the game resumes from the save, so every line just continues.
+      const gap = first.type === "session_start" && typeof first.data.gap_s === "number" ? ` · came back ${span(first.data.gap_s)} later` : "";
+      model.markers.push({ t: first.x, kind: "session", title: `left and returned${gap}` });
+    }
+    const divider = h("div", { class: "row divider" }, h("span", { class: "divider-title" }, i > 0 ? iconSvg("floppyDisk", 12) : null, title.text),
       title.rewind ? h("span", { class: "rewind" }, iconSvg("floppyDisk", 12), title.rewind) : null);
     push({ el: divider, idx: first?.idx ?? lastIdx, t: first?.x ?? lastX, cat: "other" }, null);
 
@@ -187,15 +264,15 @@ function buildTimeline(model, data) {
       }
       const r = e.type === "error" || e.type === "error_repeat" ? renderError(e) : renderEvent(e);
       if (r.badge) errors.set(`${e.s}|${e.data.message}`, { badge: r.badge, count: e.data.count ?? 1 });
-      const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}` }, gutter(e.x, e.turn),
-        h("div", { class: "body" }, h("div", { class: "line" }, r.body), r.extra),
+      // Lost to a crash (not in the save the game resumed from): kept here, in red, but not in the graph.
+      const el = h("div", { class: `row cat-${r.cat} ${r.cls ?? ""}${e.lost ? " lost" : ""}` }, gutter(e.x, e.turn),
+        h("div", { class: "body" }, h("div", { class: "line" }, r.body, e.lost ? h("span", { class: "lost-tag" }, "not in save") : null), r.extra),
         h("span", { class: "type" }, e.type));
       push({ el, idx: e.idx, t: e.x, cat: r.cat }, e.turn === null ? null : `${e.s}|${e.turn}`);
     }
 
     const last = events[events.length - 1];
     if (last) {
-      prevLastT = last.t;
       lastX = last.x;
       lastIdx = last.idx;
     }

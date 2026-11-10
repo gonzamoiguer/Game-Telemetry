@@ -152,6 +152,8 @@ input:focus { outline: none; border-color: var(--text); }
 .g-project { color: var(--text); }
 .g-project-span { stroke: var(--text-2); stroke-width: 1.5; opacity: 0.6; }
 .g-project-piece { fill: var(--text-2); }
+.g-project-span { fill: none; }
+.g-project-join { fill: var(--text); }
 
 /* Inline icons in timeline rows (resources, protest). */
 .ico { display: inline-block; vertical-align: -2px; margin-right: 3px; }
@@ -208,6 +210,9 @@ input:focus { outline: none; border-color: var(--text); }
 .row.feedback q::before { content: "“"; }
 .row.feedback q::after { content: "”"; }
 .row.error { color: var(--red); background: var(--red-soft); }
+/* Play a crash lost: the game resumed from an older save, so it never counted. */
+.row.lost { opacity: 0.6; border-left-color: var(--red); }
+.lost-tag { margin-left: 8px; color: var(--red); font: 500 10px var(--mono); text-transform: uppercase; letter-spacing: 0.08em; }
 .badge { font-size: 11px; padding: 0 5px; border: 1px solid currentColor; margin-left: 6px; }
 
 .stack { display: none; margin: 6px 0 2px; color: var(--text-2); font: 12px/1.5 var(--mono); white-space: pre-wrap; overflow-wrap: anywhere; }
