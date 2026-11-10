@@ -62,20 +62,27 @@ function grievance(d) {
 /** Tower projects: start and opening stand out; pieces and the closing hand-over are quiet rows. */
 function project(d) {
   const floors = typeof d.height === "number" ? ` · ${d.height}/${d.target ?? "?"} floors` : "";
-  const name = b(d.project ?? "?");
+  // _label / _absorbed are set by the run model: "Torre_Nely #2" when that kind was built more than once.
+  const label = d._label ?? d.project ?? "?";
+  const name = b(label);
   switch (d.phase) {
     case "started":
-      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("building", 14, "ico project-ico"), b("Project started"), " · ", d.project ?? "?",
+      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("building", 14, "ico project-ico"), b("Project started"), " · ", label,
         d.character ? ` (${d.character})` : "", typeof d.target === "number" ? ` · goal ${d.target} floors` : ""]) };
     case "piece":
       return { cat: "projects", cls: "dim", body: withRes(d, ["Piece ", d.piece ?? "?", " on ", name, floors,
         typeof d.pieces === "number" ? ` · ${d.pieces} piece${d.pieces === 1 ? "" : "s"}` : "", typeof d.multiplier === "number" ? ` · cost ×${d.multiplier}` : ""]) };
+    case "merged": {
+      const others = Array.isArray(d._absorbed) && d._absorbed.length ? d._absorbed.join(", ") : "another project";
+      return { cat: "projects", cls: "project", body: [b("Projects merged"), " · ", others, " joined ", name, floors,
+        typeof d.pieces === "number" ? ` · ${d.pieces} piece${d.pieces === 1 ? "" : "s"}` : ""] };
+    }
     case "goal_met":
       return { cat: "projects", body: [name, " reached its goal", floors, d.character ? ` · ${d.character} brings the closing piece` : ""] };
     case "closing_given":
       return { cat: "projects", cls: "dim", body: ["Closing piece of ", name, " in hand"] };
     case "opened":
-      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("checkCircle", 14, "ico project-ico"), b("Project opened"), " · ", d.project ?? "?",
+      return { cat: "projects", cls: "project", body: withRes(d, [iconSvg("checkCircle", 14, "ico project-ico"), b("Project opened"), " · ", label,
         typeof d.pieces === "number" ? ` · ${d.pieces} piece${d.pieces === 1 ? "" : "s"}` : "", floors, hasEntries(d.opening) ? [" · opening ", resNodes(d.opening)] : ""]) };
     default:
       return { cat: "projects", body: ["Project ", name, ` · ${d.phase ?? "?"}`] };

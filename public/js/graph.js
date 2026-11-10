@@ -15,6 +15,7 @@ const NEUTRAL = "#b4b4b1";
 const NS = "http://www.w3.org/2000/svg";
 const RES_H = 24;
 const LANE_H = 28;
+const PROJECT_H = 18; // one per simultaneous project
 const GAP = 6;
 const AXIS_H = 20;
 
@@ -203,29 +204,43 @@ export function createGraph(container, model, onSeek) {
       top += LANE_H;
     }
 
-    // Tower projects, all on one row (one at a time): a building where one starts, a line while it is
-    // under construction, a dot per piece, and a check where it opens. Readout: floors / target.
+    // Tower projects. Each runs on its own lane while it is under construction (finished ones free
+    // theirs for later projects): a building where it starts, a line, a dot per piece, a check where
+    // it opens. A merged project bends into the lane of the one that absorbed it, like a git branch,
+    // with a dot where they join. Readout: how many are under construction.
     if (model.projects.length) {
       top += GAP;
-      const mid = top + LANE_H / 2;
-      g.append(icon("building", 6, mid, 12, "currentColor", null, "g-project"));
-      g.append(s("text", { x: 17, y: mid + 4, class: "g-label" }, "projects"));
+      const laneY = (lane) => top + PROJECT_H / 2 + lane * PROJECT_H;
+      g.append(icon("building", 6, laneY(0), 12, "currentColor", null, "g-project"));
+      g.append(s("text", { x: 17, y: laneY(0) + 4, class: "g-label" }, "projects"));
+      const marks = s("g"); // dots and icons above every line and branch
       for (const p of model.projects) {
-        const t0 = p.t0 ?? p.start;
-        const end = p.t1 ?? model.maxT;
-        g.append(s("line", { x1: x(t0), x2: x(end), y1: mid, y2: mid, class: "g-project-span" }));
-        for (const piece of p.pieces) {
-          const dot = s("circle", { cx: x(piece.t), cy: mid, r: 2.2, class: "g-project-piece" });
-          dot.append(s("title", {}, `${p.name}: ${piece.piece ?? "piece"} · ${piece.height}/${piece.target} floors`));
-          g.append(dot);
+        const y = laneY(p.lane);
+        const x0 = x(p.t0 ?? p.start);
+        const x1 = x(p.t1 ?? model.maxT);
+        if (p.mergedInto) {
+          const yB = laneY(p.mergedInto.lane);
+          const bend = Math.min(16, Math.max(0, x1 - x0));
+          g.append(s("path", { d: `M${x0},${y}H${x1 - bend}C${x1 - bend / 2},${y} ${x1 - bend / 2},${yB} ${x1},${yB}`, class: "g-project-span" }));
+          const join = s("circle", { cx: x1, cy: yB, r: 3, class: "g-project-join" });
+          join.append(s("title", {}, `${p.label} merged into ${p.mergedInto.label}`));
+          marks.append(join);
+        } else {
+          g.append(s("line", { x1: x0, x2: x1, y1: y, y2: y, class: "g-project-span" }));
         }
-        if (p.opened) g.append(icon("checkCircle", x(end), mid, 13, "currentColor", `${p.name} opened`, "g-project", true));
-        if (p.t0 !== null) g.append(icon("building", x(p.t0), mid, 13, "currentColor", `${p.name} started`, "g-project", true));
+        for (const piece of p.pieces) {
+          const dot = s("circle", { cx: x(piece.t), cy: y, r: 2.2, class: "g-project-piece" });
+          dot.append(s("title", {}, `${p.label}: ${piece.piece ?? "piece"} · ${piece.height}/${piece.target} floors`));
+          marks.append(dot);
+        }
+        if (p.opened) marks.append(icon("checkCircle", x1, y, 13, "currentColor", `${p.label} opened`, "g-project", true));
+        if (p.t0 !== null) marks.append(icon("building", x0, y, 13, "currentColor", `${p.label} started`, "g-project", true));
       }
-      const readout = s("text", { x: valueX, y: mid + 4, class: "g-value", "text-anchor": "end" });
+      g.append(marks);
+      const readout = s("text", { x: valueX, y: laneY(0) + 4, class: "g-value", "text-anchor": "end" });
       g.append(readout);
-      readouts.push({ el: readout, points: model.projectProgress, format: (v, p) => (p.opened ? "open" : `${v}/${p.target ?? "?"}`) });
-      top += LANE_H;
+      readouts.push({ el: readout, points: model.projectProgress, format: (v) => (v ? `${v} active` : "") });
+      top += Math.max(1, model.projectLanes) * PROJECT_H;
     }
     const plotBottom = top;
 

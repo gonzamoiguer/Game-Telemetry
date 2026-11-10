@@ -162,7 +162,10 @@ const INDEX = {
   stack: "ProtestController.PickSlogan () (at Assets/Scripts/Events/ProtestController.cs:41)\nProtestController.Update () (at Assets/Scripts/Events/ProtestController.cs:23)",
 };
 
-const TOWER = { project: "Torre_Nely", id: "seed-tower-1", target: 4, character: "Nely" };
+// Run 3 builds two Nely towers at once, merges them, opens the result, and starts an Embajador tower.
+const TOWER = { project: "Torre_Nely", id: "seed-tower-1", target: 5, character: "Nely" };
+const TOWER2 = { ...TOWER, id: "seed-tower-2" };
+const TOWER3 = { project: "Torre_Emb", id: "seed-tower-3", target: 4, character: "Embajador" };
 const LEAK = { grievance: "Grievance_Nely_Leak", character: "Nely" };
 
 // ---------------------------------------------------------------- player 1, run 1 (the long one)
@@ -271,7 +274,12 @@ g3.sessions.push(s);
 s.emit("run_start", { scenario: "Tutorial", legacy: false }, 1);
 s.play(12, {
   2: (x) => x.emit("character_appeared", { character: "Nely" }, 4),
-  6: (x) => x.emit("debug_marker", { note: "tester pressed F9", scene: "Main" }, 1),
+  6: (x) => {
+    x.emit("debug_marker", { note: "tester pressed F9", scene: "Main" }, 1);
+    // A bridge piece touches both Nely towers: the second folds into the first (the older).
+    x.emit("project", { ...TOWER, phase: "merged", absorbed: [TOWER2.id], turn: 6, pieces: 4, height: 3 }, 6);
+    x.emit("project", { ...TOWER, phase: "piece", turn: 6, pieces: 5, height: 4, piece: "Torre_Puente", res: { ...g3.res } }, 1);
+  },
   7: (x) => {
     const shop = { shop: "Shop_Ambassador", character: "Embajador", turn: 7 };
     x.emit("shop", { ...shop, phase: "open", hand: 5, hand_size: 7, res: { ...g3.res } }, 3);
@@ -284,16 +292,26 @@ s.play(12, {
   3: (x) => x.emit("project", { ...TOWER, phase: "started", turn: 3, pieces: 0, height: 1, piece: "Torre_Base", res: { ...g3.res } }, 4),
   4: (x) => {
     x.emit("influence_level_up", { character: "Nely", level: 1 }, 2);
-    x.emit("project", { ...TOWER, phase: "piece", turn: 4, pieces: 1, height: 2, piece: "Torre_Piso", multiplier: 1.15, res: { ...g3.res } }, 5);
+    x.emit("project", { ...TOWER, phase: "piece", turn: 4, pieces: 1, height: 2, piece: "Torre_Piso", res: { ...g3.res } }, 5);
+    x.emit("project", { ...TOWER2, phase: "started", turn: 4, pieces: 0, height: 1, piece: "Torre_Base", res: { ...g3.res } }, 4);
   },
-  5: (x) => x.emit("project", { ...TOWER, phase: "piece", turn: 5, pieces: 2, height: 3, piece: "Torre_Piso", multiplier: 1.3, res: { ...g3.res } }, 5),
+  5: (x) => {
+    x.emit("project", { ...TOWER, phase: "piece", turn: 5, pieces: 2, height: 3, piece: "Torre_Piso", res: { ...g3.res } }, 5);
+    x.emit("project", { ...TOWER2, phase: "piece", turn: 5, pieces: 1, height: 2, piece: "Torre_Piso", res: { ...g3.res } }, 4);
+  },
   8: (x) => {
     x.emit("character_gave", { character: "Nely", cards: ["Farol"] }, 2);
-    x.emit("project", { ...TOWER, phase: "piece", turn: 8, pieces: 3, height: 4, piece: "Torre_Balcon", multiplier: 1.45, res: { ...g3.res } }, 4);
-    x.emit("project", { ...TOWER, phase: "goal_met", turn: 8, pieces: 3, height: 4 }, 1);
+    x.emit("project", { ...TOWER, phase: "piece", turn: 8, pieces: 6, height: 5, piece: "Torre_Balcon", res: { ...g3.res } }, 4);
+    x.emit("project", { ...TOWER, phase: "goal_met", turn: 8, pieces: 6, height: 5 }, 1);
   },
-  9: (x) => x.emit("project", { ...TOWER, phase: "closing_given", turn: 9, pieces: 3, height: 4 }, 3),
-  11: (x) => x.emit("project", { ...TOWER, phase: "opened", turn: 11, pieces: 3, height: 5, piece: "Torre_Techo", opening: { Electricity: 5 }, res: { ...g3.res } }, 6),
+  9: (x) => {
+    x.emit("project", { ...TOWER, phase: "closing_given", turn: 9, pieces: 6, height: 5 }, 3);
+    x.emit("project", { ...TOWER3, phase: "started", turn: 9, pieces: 0, height: 1, piece: "Torre_Base", res: { ...g3.res } }, 5);
+  },
+  11: (x) => {
+    x.emit("project", { ...TOWER, phase: "opened", turn: 11, pieces: 6, height: 6, piece: "Torre_Techo", opening: { Electricity: 8 }, res: { ...g3.res } }, 6);
+    x.emit("project", { ...TOWER3, phase: "piece", turn: 11, pieces: 1, height: 2, piece: "Torre_Piso", res: { ...g3.res } }, 4);
+  },
   10: (x) => {
     const g = { grievance: "Grievance_Nely_Lamp", character: "Nely" };
     x.emit("grievance", { ...g, phase: "fired", turn: 10, turns_left: 3, turn_limit: 3, relationship: -0.8, band: "Conflict", target: "Farol",

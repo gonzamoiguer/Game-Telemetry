@@ -152,6 +152,8 @@ input:focus { outline: none; border-color: var(--text); }
 .g-project { color: var(--text); }
 .g-project-span { stroke: var(--text-2); stroke-width: 1.5; opacity: 0.6; }
 .g-project-piece { fill: var(--text-2); }
+.g-project-span { fill: none; }
+.g-project-join { fill: var(--text); }
 
 /* Inline icons in timeline rows (resources, protest). */
 .ico { display: inline-block; vertical-align: -2px; margin-right: 3px; }

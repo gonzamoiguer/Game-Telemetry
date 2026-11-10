@@ -20,10 +20,15 @@ function buildModel(data) {
   const lanes = new Map();
   const markers = [];
   const protests = []; // { t0, t1 (null = still on), cause }
-  // Tower projects, one at a time, all on one row: { name, id, t0 (null = before the data), t1, opened,
-  // cut, pieces: [{ t, height, target, piece }] }. progress: height over time, for the readout.
+  // Tower projects, keyed by instance id. Several can be under construction at once, and a merge ends
+  // the absorbed ones in the survivor. One span per stretch of a project:
+  // { name, label, id, t0 (null = started before this span), start, t1 (null = still building), opened,
+  //   cut (a reload abandoned it), mergedInto (span), pieces: [{ t, height, target, piece }], lane }.
   const projects = [];
-  const projectProgress = [];
+  const projectById = new Map(); // id → its latest span
+  const projectProgress = []; // how many are under construction, for the readout
+  const projectLabel = projectLabels(events);
+  let lastReload = 0; // replay time of the latest save reload
   let prevT = null;
   let x = 0;
   let turn = null;
@@ -39,6 +44,7 @@ function buildModel(data) {
     if (prevT !== null) {
       if (e.t < prevT - 0.001) {
         markers.push({ t: x, kind: "reload" });
+        lastReload = x;
         // What was going on in the abandoned timeline stops here, without an outcome.
         for (const l of lanes.values()) {
           const open = l.grievances.at(-1);
@@ -46,8 +52,7 @@ function buildModel(data) {
         }
         const protest = protests.at(-1);
         if (protest && protest.t1 === null) Object.assign(protest, { t1: x, cut: true });
-        const project = projects.at(-1);
-        if (project && project.t1 === null) Object.assign(project, { t1: x, cut: true });
+        for (const p of projects) if (p.t1 === null) Object.assign(p, { t1: x, cut: true });
       }
       else x += e.t - prevT;
     }
@@ -94,17 +99,28 @@ function buildModel(data) {
         }
       }
     }
-    if (e.type === "project") {
-      let p = projects.at(-1);
-      if (p && p.t1 !== null) p = null;
-      if (p && p.id !== d.id) { Object.assign(p, { t1: x, cut: true }); p = null; }
-      if (d.phase === "started" || !p) {
-        p = { name: d.project, id: d.id, t0: d.phase === "started" ? x : null, start: x, t1: null, opened: false, cut: false, pieces: [] };
+    if (e.type === "project" && typeof d.id === "string") {
+      d._label = projectLabel.get(d.id) ?? d.project; // for the timeline row
+      let p = projectById.get(d.id);
+      if (!p || p.t1 !== null) {
+        // New, or seen again after a reload cut it: a fresh span. A continuation was in the loaded save,
+        // so it resumes right at the reload.
+        const start = p?.cut ? lastReload : x;
+        p = { name: d.project, label: d._label, id: d.id, t0: null, start, t1: null, opened: false, cut: false, mergedInto: null, pieces: [] };
         projects.push(p);
+        projectById.set(d.id, p);
       }
+      if (d.phase === "started" && p.t0 === null && p.start === x && !p.pieces.length) p.t0 = x;
       if (d.phase === "piece") p.pieces.push({ t: x, height: d.height, target: d.target, piece: d.piece });
+      if (d.phase === "merged" && Array.isArray(d.absorbed)) {
+        d._absorbed = d.absorbed.map((id) => projectLabel.get(id) ?? "another project");
+        for (const id of d.absorbed) {
+          const a = projectById.get(id);
+          if (a && a.t1 === null) Object.assign(a, { t1: x, mergedInto: p });
+        }
+      }
       if (d.phase === "opened") Object.assign(p, { t1: x, opened: true });
-      if (typeof d.height === "number") projectProgress.push({ t: x, v: d.height, idx: e.idx, target: d.target, name: d.project, opened: d.phase === "opened" });
+      projectProgress.push({ t: x, v: projects.filter((q) => q.t1 === null).length, idx: e.idx });
     }
     if (e.type === "protest") {
       const open = protests.at(-1);
@@ -117,7 +133,45 @@ function buildModel(data) {
     if (e.type === "error") markers.push({ t: x, kind: "error" });
   }
 
-  return { events, resources, lanes, markers, protests, projects, projectProgress, maxT: Math.max(1, x), lastTurn };
+  const projectLanes = assignProjectLanes(projects);
+  return { events, resources, lanes, markers, protests, projects, projectLanes, projectProgress, maxT: Math.max(1, x), lastTurn };
+}
+
+/**
+ * "Torre_Nely", or "Torre_Nely #2" when that kind of project was built more than once in the run, so
+ * simultaneous (and merging) towers of the same kind can be told apart. Numbered in order of appearance.
+ */
+function projectLabels(events) {
+  const idsByName = new Map();
+  for (const e of events) {
+    if (e.type !== "project" || typeof e.data?.id !== "string") continue;
+    const ids = idsByName.get(e.data.project) ?? [];
+    for (const id of [e.data.id, ...(Array.isArray(e.data.absorbed) ? e.data.absorbed : [])]) if (!ids.includes(id)) ids.push(id);
+    idsByName.set(e.data.project, ids);
+  }
+  const labels = new Map();
+  for (const [name, ids] of idsByName) ids.forEach((id, i) => labels.set(id, ids.length > 1 ? `${name} #${i + 1}` : name));
+  return labels;
+}
+
+/**
+ * Gives each project span a lane: the first lane free when it starts (a finished or merged project
+ * frees its lane, so later ones reuse it); simultaneous ones stack. A span that continues the same
+ * project after a reload keeps its lane when it can. Returns how many lanes are used.
+ */
+function assignProjectLanes(projects) {
+  const laneEnd = []; // per lane: when its last project ended (Infinity = still building)
+  const lastLane = new Map(); // id → lane of its previous span
+  for (const p of projects) {
+    const end = p.t1 ?? Infinity;
+    const prev = lastLane.get(p.id);
+    let lane = prev !== undefined && laneEnd[prev] <= p.start ? prev : laneEnd.findIndex((t) => t < p.start);
+    if (lane < 0) lane = laneEnd.length;
+    laneEnd[lane] = end;
+    p.lane = lane;
+    lastLane.set(p.id, lane);
+  }
+  return laneEnd.length;
 }
 
 /** Text for a session divider. */
